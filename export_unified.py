@@ -74,7 +74,14 @@ if __name__ == '__main__':
     print(f"Running command: {args.type}")
     print("args:{0}".format(args))
 
-    blender_path = 'singularity run --nv blender_binary.sig' if args.use_singularity else 'blender'
+    hostname = __import__('socket').gethostname()
+    if 'pop-os' in hostname:
+        singularity_cmd = 'sudo /home/linuxbrew/.linuxbrew/bin/singularity'
+    else:
+        singularity_cmd = 'singularity'
+
+    pwd = os.getcwd()
+    blender_path = f'{singularity_cmd} run --nv  --bind {pwd}:/root singularity/blender_binary.sig' if args.use_singularity else 'blender'
     if args.type is None:
         if args.rendering:
             rendering_script = (
@@ -133,7 +140,7 @@ if __name__ == '__main__':
                 run_command(rendering_script)
             elif args.type == 'human':
                 rendering_script = (
-                    f"{blender_path} --background --python {current_path}/render_human.py -- "
+                    f"{blender_path} --background --python render_human.py -- "
                     f"--output_dir {args.output_dir} --character_root {args.character_root} "
                     f"--partnet_root {args.partnet_root} --gso_root {args.gso_root} "
                     f"--background_hdr_path {args.background_hdr_path} --scene_root {args.scene_root} "

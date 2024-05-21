@@ -737,7 +737,7 @@ class Blender_render():
             bpy.context.scene.camera.keyframe_insert(data_path="location", frame=frame_next)
             bpy.context.scene.camera.keyframe_insert(data_path="rotation_euler", frame=frame_next)
 
-    def render(self):
+    def render(self, start_frame=None, end_frame=None, skip_n=1):
         """Renders all frames (or a subset) of the animation.
         """
         print("Using scratch rendering folder: '%s'" % self.scratch_dir)
@@ -751,7 +751,13 @@ class Blender_render():
 
         absolute_path = os.path.abspath(self.scratch_dir)
 
-        frames = range(bpy.context.scene.frame_start, bpy.context.scene.frame_end + 1)
+        if start_frame is None:
+            start_frame = bpy.context.scene.frame_start
+        if end_frame is None:
+            end_frame = bpy.context.scene.frame_end + 1
+        frames = range(start_frame, end_frame)
+        assert frames[0] == bpy.context.scene.frame_start, f"Frames do not start at {bpy.context.scene.frame_start}, but {frames[0]} was passed in"
+        assert frames[-1] <= bpy.context.scene.frame_end + 1, f"Frames do not end at {bpy.context.scene.frame_end + 1}, but {frames[-1]} was passed in"
 
         # add forces
         for frame_nr in frames:
@@ -980,6 +986,9 @@ if __name__ == "__main__":
     parser.add_argument('--indoor', action='store_true', default=False)
     parser.add_argument('--views', type=int, default=1)
     parser.add_argument('--render_engine', type=str, default='CYCLES', choices=['BLENDER_EEVEE', 'CYCLES'])
+    parser.add_argument('--start_frame', type=int, default=None)
+    parser.add_argument('--end_frame', type=int, default=None)
+    parser.add_argument('--skip_n', type=int, default=1)
     args = parser.parse_args(argv)
     print("args:{0}".format(args))
 
@@ -993,6 +1002,6 @@ if __name__ == "__main__":
                               add_force=args.add_force, force_step=args.force_step, force_interval=args.force_interval, force_num=args.force_num,
                               views=args.views)
 
-    renderer.render()
+    renderer.render(start_frame=args.start_frame, end_frame=args.end_frame, skip_n=args.skip_n)
 
 

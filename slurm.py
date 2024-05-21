@@ -74,7 +74,7 @@ def get_excluded_nodes(*args):
 def signal_handler(signum, frame):
     raise KeyboardInterrupt
 
-def train(data_path, slurm_task_index):
+def train(data_path, slurm_task_index, mode=None, local=False):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     try:
         job_id = os.getenv('SLURM_JOB_ID')
@@ -87,25 +87,26 @@ def train(data_path, slurm_task_index):
     result = subprocess.check_output("nvidia-smi -L", shell=True).decode()
     print(result)
 
-    import random
-    mode_probabilities = {
-        'indoor': 0.10,
-        'robot': 0.10,
-        'outdoor': 0.80,
-    }
+    if mode is None:
+        import random
+        mode_probabilities = {
+            'indoor': 0.10,
+            'robot': 0.10,
+            'outdoor': 0.80,
+        }
 
-    modes = list(mode_probabilities.keys())
-    probabilities = list(mode_probabilities.values())
-    mode = random.choices(modes, probabilities)[0]
+        modes = list(mode_probabilities.keys())
+        probabilities = list(mode_probabilities.values())
+        mode = random.choices(modes, probabilities)[0]
+        print(f"Choosing mode {mode} with probability {mode_probabilities[mode]}")
 
     samples_per_pixel = 32
     common_command = [
-        "python", "export_annotation.py",
+        "python", "export_unified.py",
         "--rendering",
         "--exr",
         "--export_obj",
         "--export_tracking",
-        "--use_singularity",
         "--use_gpu",
         "--samples_per_pixel", f"{samples_per_pixel}",
         "--sampling_character_num", "5000",
@@ -114,11 +115,16 @@ def train(data_path, slurm_task_index):
         "--end_frame", "11",
     ]
 
+    if local is False:
+        common_command = common_command + [
+            "--use_singularity",
+        ]
+
     if mode == 'indoor':
         command = common_command + [
             "--add_fog",
-            "--randomize"
-            "--add_force"
+            "--randomize",
+            "--add_force",
         ]
     elif mode == 'robot':
         command = common_command + [
@@ -127,7 +133,8 @@ def train(data_path, slurm_task_index):
     elif mode == 'outdoor':
         command = common_command + [
             "--type", "human",
-            "--add_force"
+            "--add_force",
+            "--scene_root", "./data/blender_assets/hdri.blend" # TODO: Not sure what the difference is between hdri and hdri_plane
         ]
     elif mode == 'animal':
         command = common_command + [
@@ -204,7 +211,7 @@ app = typer.Typer(pretty_exceptions_show_locals=False)
 
 @app.command()
 def main(
-    data_path: Path,
+    data_path: Path = "results",
     num_workers: int = 10,
     num_to_process: int = 1000,
     use_slurm: bool = False,
@@ -219,7 +226,7 @@ def main(
         train(data_path, slurm_task_index)
     else:
         with breakpoint_on_error():
-            train(data_path, 0)
+            train(data_path, 0, mode='outdoor', local=True)
     
 if __name__ == '__main__':
     app()

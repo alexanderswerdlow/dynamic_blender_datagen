@@ -367,6 +367,11 @@ class Blender_render():
 
         # set samples per pixel
         bpy.context.scene.cycles.samples = self.samples_per_pixel
+        if start_frame is None:
+            start_frame = bpy.context.scene.frame_start
+        if end_frame is None:
+            end_frame = bpy.context.scene.frame_end + 1
+        frames = range(start_frame, end_frame)
         assert frames[0] == bpy.context.scene.frame_start, f"Frames do not start at {bpy.context.scene.frame_start}, but {frames[0]} was passed in"
         assert frames[-1] <= bpy.context.scene.frame_end + 1, f"Frames do not end at {bpy.context.scene.frame_end + 1}, but {frames[-1]} was passed in"
 
@@ -586,8 +591,8 @@ if __name__ == "__main__":
     parser.add_argument('--background_hdr_path', type=str, default=None)
     parser.add_argument('--output_dir', type=str, metavar='PATH', default='../results/human_in_scene',
                         help='img save dir')
-    parser.add_argument('--start_frame', type=int, default=0)
-    parser.add_argument('--end_frame', type=int, default=1800)
+    parser.add_argument('--start_frame', type=int, default=None)
+    parser.add_argument('--end_frame', type=int, default=None)
     parser.add_argument('--samples_per_pixel', type=int, default=128)
     parser.add_argument('--use_gpu', action='store_true', default=False)
     parser.add_argument('--render_engine', type=str, default='CYCLES', choices=['BLENDER_EEVEE', 'CYCLES'])
@@ -610,7 +615,6 @@ if __name__ == "__main__":
                               fog_path=args.fog_path, randomize=args.randomize, material_path=args.material_path,
                               views=args.views)
 
-    frames = range(args.start_frame, args.end_frame)
-    renderer.render(frames, skip_n=args.skip_n)
+    renderer.render(start_frame=args.start_frame, end_frame=args.end_frame, skip_n=args.skip_n)
 
 

@@ -175,3 +175,5 @@ sandbox/
 debug/
 debug
 data
+build_assets/
+blender.def
