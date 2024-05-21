@@ -207,7 +207,7 @@ def postprocess(
     from_dir = epath.Path(from_dir)
     data_stack = collections.defaultdict(list)
 
-    exr_frames = sorted((from_dir / "exr").glob("*.exr"))[frame_idx:]
+    exr_frames = sorted((from_dir / "exr").glob("*.exr"))
     png_frames = [from_dir / "images" / (exr_filename.stem + ".png")
                   for exr_filename in exr_frames]
     scene_info = json.load(open(from_dir / 'scene_info.json', 'r'))
@@ -260,7 +260,7 @@ if __name__ == '__main__':
                         default='/Users/yangzheng/code/project/renderer/results/robot/exr_img',
                         help='img save dir')
     parser.add_argument('--batch_size', type=int, default=32)
-    parser.add_argument('--frame_idx', type=int, default=0)
+    parser.add_argument('--frame_idx', type=int, default=1)
     args = parser.parse_args()
     print("args:{0}".format(args))
 

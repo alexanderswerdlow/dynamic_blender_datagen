@@ -1,7 +1,10 @@
 import numpy as np
 import cv2
 import os
-
+import rerun as rr
+import rerun.blueprint as rrb
+import numpy as np
+from scipy.interpolate import griddata
 
 def save_to_ply(data, filename):
     with open(filename, 'w') as ply:
@@ -58,57 +61,94 @@ def inverse_projection(depth, K, RT):
     return world_coordinates
 
 
-
-
 if __name__ == '__main__':
-    data_path = './data/point_odyssey/train'
-    annotations = np.load('{}/dancing/annot.npz'.format(data_path))
+    data_path = 'sample'
+    scene_name = 'r4_new_f'
+    annotations = np.load(f'{data_path}/{scene_name}/anno.npz')
     trajs_3d = annotations['trajs_3d'].astype(np.float32)
     cam_ints = annotations['intrinsics'].astype(np.float32)
     cam_exts = annotations['extrinsics'].astype(np.float32)
+    num_frames = len(trajs_3d)
+    num_frames = min(num_frames, 60)
 
-    depth_16bit = cv2.imread('{}/dancing/depths/depth_00244.png'.format(data_path), cv2.IMREAD_ANYDEPTH)
-    img = cv2.imread('{}/dancing/rgbs/rgb_00244.jpg'.format(data_path))
-    h, w = depth_16bit.shape
-    print(depth_16bit.shape, np.max(depth_16bit), np.min(depth_16bit))
+    blueprint = rrb.Horizontal(
+        rrb.Spatial3DView(name="3D", origin="world"),
+        rrb.Grid([
+            rrb.Spatial2DView(
+                name="rgb",
+                origin=f"world/camera/image/rgb",
+            ),
+            rrb.Spatial2DView(
+                name="depth",
+                origin=f"world/camera/image/depth",
+            )
+        ]),
+    )
 
-    print(trajs_3d.shape, cam_ints.shape, cam_exts.shape)
+    rr.init("rerun_example_my_data", default_blueprint=blueprint)
+    rr.spawn()
+    rr.log("world", rr.ViewCoordinates.RIGHT_HAND_Z_UP, static=True)
 
-    trajs = trajs_3d[243]
-    cam_intrinsic = cam_ints[243]
-    cam_extrinsic = cam_exts[243]
+    for index in range(num_frames):
+        depth_16bit = cv2.imread(f'{data_path}/{scene_name}/depths/depth_{index:05d}.png', cv2.IMREAD_ANYDEPTH)
+        img = cv2.imread(f'{data_path}/{scene_name}/rgbs/rgb_{index:05d}.jpg')
+        seg_mask = cv2.imread(f'{data_path}/{scene_name}/masks/mask_{index:05d}.png')
+        static_mask = (seg_mask == 0).all(-1)
+        h, w = depth_16bit.shape
 
-    # this is camera transformation needed for V1.0 dataset
-    # R1 = np.array([[1, 0, 0, 0], [0, 0, -1, 0], [0, 1, 0, 0], [0, 0, 0, 1]])
-    # R2 = np.array([[-1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]])
-    #
-    # cam_extrinsic = R2 @ cam_extrinsic @ R1
+        trajs = trajs_3d[index]
+        cam_intrinsic = cam_ints[index]
+        cam_extrinsic = cam_exts[index]
 
+        depth = depth_16bit.astype(np.float32) / 65535.0 * 1000.0
+        depth_inv = inverse_projection(depth, cam_intrinsic, cam_extrinsic)
 
-    depth = depth_16bit.astype(np.float32) / 65535.0 * 1000.0
-    depth_inv = inverse_projection(depth, cam_intrinsic, cam_extrinsic)
+        uv, Z = reprojection(trajs, cam_intrinsic, cam_extrinsic)
 
-    save_to_ply(depth_inv, '{}/dancing/depth_inv.ply'.format(data_path))
-    save_to_ply(trajs, '{}/dancing/trajs.ply'.format(data_path))
+        uv = np.round(uv).astype(np.int32)
+        for i in range(len(uv)):
+            u, v = uv[i]
+            z = Z[i]
+            if 0 < u < w and 0 < v < h:
+                d = depth[int(v), int(u)]
+                if d > z - 0.15 and d < z + 0.15:
+                    img[int(v), int(u), :] = np.array([255, 255, 255])
 
-    uv, Z = reprojection(trajs, cam_intrinsic, cam_extrinsic)
+        rr.set_time_sequence("frame", index)
 
-    uv = np.round(uv).astype(np.int32)
-    for i in range(len(uv)):
-        u, v = uv[i]
-        z = Z[i]
-        if 0 < u < w and 0 < v < h:
+        rr.log("world/trajs", rr.Points3D(trajs))
+        rr.log("world/camera/depth", rr.DepthImage(depth))
+        rr.log("world/camera/rgb", rr.Image(img))
+        rr.log("world/camera", rr.Transform3D(rr.TranslationAndMat3x3(translation=cam_extrinsic[:3, 3], mat3x3=cam_extrinsic[:3, :3], from_parent=True)))
+        rr.log(
+            "world/camera",
+            rr.Pinhole(
+                resolution=[w, h],
+                focal_length=[cam_intrinsic[0, 0], cam_intrinsic[1, 1]],
+                principal_point=[cam_intrinsic[0, 2], cam_intrinsic[1, 2]],
+            ),
+            static=True
+        )
 
-            # for v1.0
-            # d = depth[int(v), w - int(u)]
-            #
-            # if d > z - 0.15 and d < z + 0.15:
-            #     img[int(v), w - int(u), :] = np.array([255, 255, 255])
+        delta_trajs = trajs - trajs_3d[0]
+        non_static = (delta_trajs > 0).any(axis=-1)
 
-            d = depth[int(v), int(u)]
+        rr.log("world/trajs_init", rr.Points3D(trajs_3d[0]), static=True)
+        rr.log("world/trajs_delta", rr.Arrows3D(origins=trajs_3d[0][non_static], vectors=delta_trajs[non_static]))
 
-            if d > z - 0.15 and d < z + 0.15:
-                img[int(v), int(u), :] = np.array([255, 255, 255])
+        grid_x, grid_y = np.meshgrid(np.arange(w), np.arange(h))
+        channels = [griddata(uv, delta_trajs[:, i], (grid_y, grid_x), method='cubic', fill_value=0) for i in range(3)]
+        delta_image = np.stack(channels, axis=-1)
+        delta_image[static_mask] = 0
 
-    cv2.imshow('img', img)
-    cv2.waitKey(0)
+        rr.log("world/camera/delta_img", rr.Image(delta_image))
+
+        # for i in range(3):
+        #     min_val = np.min(dense_image[:, :, i])
+        #     max_val = np.max(dense_image[:, :, i])
+        #     dense_image[:, :, i] = (dense_image[:, :, i] - min_val) / (max_val - min_val)
+
+        # from image_utils import Im
+        # Im(dense_image).save()
+
+    # breakpoint()

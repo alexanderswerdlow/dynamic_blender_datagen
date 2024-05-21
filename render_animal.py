@@ -417,7 +417,12 @@ class Blender_render():
 
         # load mesh sequence
         seq_imp_settings = bpy.types.PropertyGroup.bl_rna_get_subclass_py("SequenceImportSettings")
-        seq_imp_settings.fileNamePrefix = bpy.props.StringProperty(name='File Name', default='0')
+        if seq_imp_settings is None:
+            print("seq_imp_settings is None!!!")
+            print(seq_imp_settings)
+            print(bpy.props.StringProperty(name='File Name', default='0'))
+        else:
+            seq_imp_settings.fileNamePrefix = bpy.props.StringProperty(name='File Name', default='0')
         print('importing mesh sequence')
         bpy.ops.ms.import_sequence(directory=os.path.join(self.scratch_dir, 'tmp', 'animal_obj'))
         print('importing mesh sequence done!')

@@ -165,7 +165,7 @@ def write_palette_png(data: np.array, filename: PathLike,
     w.write(fp, data[:, :, 0])
 
 
-def write_scaled_png(data: np.array, filename: PathLike, min: np.float = None, max: np.float = None) -> Dict[str, float]:
+def write_scaled_png(data: np.array, filename: PathLike, min: np.float_ = None, max: np.float_ = None) -> Dict[str, float]:
   """Scales data to [0, 1] and then saves as png and returns the scale.
 
   Args:

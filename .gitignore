@@ -164,3 +164,14 @@ cython_debug/
 data/
 
 results/
+sample/
+output/
+outputs/
+debug/
+sandbox/
+*.sif
+*.sig
+*.zip
+debug/
+debug
+data

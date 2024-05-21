@@ -8,6 +8,7 @@ import random
 
 import bpy
 import mathutils
+from pathlib import Path
 
 class Blender_render():
     def __init__(self,
@@ -55,9 +56,9 @@ class Blender_render():
         self.activate_render_passes(normal=True, optical_flow=True, segmentation=True, uv=True)
         self.exr_output_node = self.set_up_exr_output_node()
 
-        if background_hdr_path and os.path.exists(background_hdr_path):
-            print('loading hdr from:', background_hdr_path)
-            self.load_background_hdr(background_hdr_path)
+        hdr_list = os.listdir(background_hdr_path)
+        hdr_list = [os.path.join(background_hdr_path, x) for x in hdr_list if '.hdr' in x or '.exr' in x]
+        self.background_hdr_path = np.random.choice(hdr_list)
 
         if randomize and os.path.exists(self.material_path):
             self.randomize_scene()
@@ -313,6 +314,7 @@ class Blender_render():
                                                "forward_flow", "depth",
                                                "normal", "object_coordinates",
                                                "segmentation"),
+               skip_n: int = 1
                ) -> Dict[str, np.ndarray]:
         """Renders all frames (or a subset) of the animation and returns images as a dict of arrays.
 
@@ -365,16 +367,17 @@ class Blender_render():
 
         # set samples per pixel
         bpy.context.scene.cycles.samples = self.samples_per_pixel
-        frames = range(frames[0], bpy.context.scene.frame_end + 1)
+        assert frames[0] == bpy.context.scene.frame_start, f"Frames do not start at {bpy.context.scene.frame_start}, but {frames[0]} was passed in"
+        assert frames[-1] <= bpy.context.scene.frame_end + 1, f"Frames do not end at {bpy.context.scene.frame_end + 1}, but {frames[-1]} was passed in"
 
         use_multiview = self.views > 1
         if not use_multiview:
             for frame_nr in frames:
-                bpy.context.scene.frame_set(frame_nr)
+                actual_frame_idx = frame_nr * skip_n
+                bpy.context.scene.frame_set(actual_frame_idx)
                 # When writing still images Blender doesn't append the frame number to the png path.
                 # (but for exr it does, so we only adjust the png path)
-                bpy.context.scene.render.filepath = os.path.join(
-                    self.scratch_dir, "images", f"frame_{frame_nr:04d}.png")
+                bpy.context.scene.render.filepath = os.path.join(self.scratch_dir, "images", f"frame_{frame_nr:04d}.png")
                 bpy.ops.render.render(animation=False, write_still=True)
 
                 modelview_matrix = bpy.context.scene.camera.matrix_world.inverted()
@@ -382,6 +385,9 @@ class Blender_render():
                 # K = get_intrinsics(bpy.context.scene)
                 np.savetxt(os.path.join(camera_save_dir, f"RT_{frame_nr:04d}.txt"), modelview_matrix)
                 np.savetxt(os.path.join(camera_save_dir, f"K_{frame_nr:04d}.txt"), K)
+
+                exr_path = Path(os.path.join(self.scratch_dir, "exr", "frame_{:04d}.exr".format(actual_frame_idx)))
+                exr_path.rename(os.path.join(self.scratch_dir, "exr", "frame_{:04d}.exr".format(frame_nr)))
 
                 print("Rendered frame '%s'" % bpy.context.scene.render.filepath)
         else:
@@ -590,6 +596,7 @@ if __name__ == "__main__":
     parser.add_argument('--randomize', default=False, action='store_true')
     parser.add_argument('--material_path', default=None, type=str)
     parser.add_argument('--views', default=1, type=int)
+    parser.add_argument('--skip_n', default=1, type=int)
     args = parser.parse_args(argv)
     print("args:{0}".format(args))
 
@@ -604,6 +611,6 @@ if __name__ == "__main__":
                               views=args.views)
 
     frames = range(args.start_frame, args.end_frame)
-    renderer.render(frames)
+    renderer.render(frames, skip_n=args.skip_n)
 
 

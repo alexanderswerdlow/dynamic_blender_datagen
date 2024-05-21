@@ -1,3 +1,4 @@
+from pathlib import Path
 import numpy as np
 import json
 import os
@@ -61,7 +62,9 @@ class Blender_render():
         self.motion_path = motion_path
         self.GSO_path = GSO_path
         self.camera_path = camera_path
-        self.motion_dataset = ['CMU'] # ['TotalCapture', 'DanceDB', 'CMU', 'MoSh', 'SFU']
+        self.motion_path = motion_path
+        # self.motion_dataset = ['CMU'] # ['TotalCapture', 'DanceDB', 'CMU', 'MoSh', 'SFU']
+        self.motion_dataset = [d.name for d in Path(motion_path).iterdir() if d.is_dir()]
         self.motion_speed = {'TotalCapture': 1 / 1.5, 'DanceDB': 1.0, 'CMU': 1.0, 'MoSh': 1.0 / 1.2, 'SFU': 1.0 / 1.2}
 
         self.force_step = force_step
@@ -502,14 +505,14 @@ class Blender_render():
     def retarget_smplx2skeleton(self, mapping):
         # get source motion
         motion_dataset = np.random.choice(self.motion_dataset)
-        print('sampling motions from {}/{}'.format(self.motion_path, motion_dataset))
         # find all the npz file in the folder recursively
         motion_files = glob.glob(os.path.join(self.motion_path, motion_dataset, '**/*.npz'), recursive=True)
         motion_files = [f for f in motion_files]
         # filter out too small motion
         motion_files = [f for f in motion_files if os.path.getsize(f) > 1e7]
+        print(f"Number of motion files: {len(motion_files)}")
         motion = np.random.choice(motion_files)
-        print('loading motion {}'.format(motion))
+        print(f"loading motion {motion}")
 
         # load smplx motion using smplx addon
         bpy.ops.object.smplx_add_animation(filepath=motion)

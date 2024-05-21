@@ -19,6 +19,9 @@ parser.add_argument('--scene_root', type=str, default='')
 parser.add_argument('--output_dir', type=str, metavar='PATH', default='',
                     help='obj save dir')
 parser.add_argument('--export_character', type=bool, default=True)
+parser.add_argument('--start_frame', type=int, default=None)
+parser.add_argument('--end_frame', type=int, default=None)
+parser.add_argument('--skip_n', type=int, default=1)
 args = parser.parse_args(argv)
 print("args:{0}".format(args))
 
@@ -63,9 +66,15 @@ if args.export_character:
             obj.hide_viewport = False
             obj.select_set(True)
             character_set.append(obj.name)
-    frames = range(bpy.context.scene.frame_start, bpy.context.scene.frame_end + 1)
+
+    if args.start_frame is not None and args.end_frame is not None:
+        frames = range(args.start_frame, args.end_frame + 1)
+        assert frames[0] == bpy.context.scene.frame_start
+        assert frames[-1] <= bpy.context.scene.frame_end + 1
+    else:
+        frames = range(bpy.context.scene.frame_start, bpy.context.scene.frame_end + 1)
     for frame_nr in frames:
-        bpy.context.scene.frame_set(frame_nr)
+        bpy.context.scene.frame_set(frame_nr * args.skip_n)
         bpy.ops.export_scene.obj(filepath=os.path.join(obj_save_dir, f'character_{frame_nr:04d}.obj'),
                                  use_selection=True, use_mesh_modifiers=True,
                                  use_normals=False, use_uvs=False, use_triangles=False,
