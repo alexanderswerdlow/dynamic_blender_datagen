@@ -17,10 +17,10 @@ from datetime import datetime, timedelta
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
+from constants import DATA_DIR
 
 import numpy as np
 import torch
-from joblib import Memory
 from tqdm import tqdm
 
 node_gpus = {
@@ -90,9 +90,9 @@ def train(data_path, slurm_task_index, mode=None, local=False):
     if mode is None:
         import random
         mode_probabilities = {
-            'indoor': 0.10,
-            'robot': 0.10,
-            'outdoor': 0.80,
+            'indoor': 0.0,
+            'robot': 0.0,
+            'outdoor': 1.00,
         }
 
         modes = list(mode_probabilities.keys())
@@ -128,18 +128,18 @@ def train(data_path, slurm_task_index, mode=None, local=False):
         ]
     elif mode == 'robot':
         command = common_command + [
-            "--scene_dir", "./data/demo_scene/robot.blend",
+            "--scene_dir", str(DATA_DIR / "demo_scene" / "robot.blend"),
         ]
     elif mode == 'outdoor':
         command = common_command + [
             "--type", "human",
             "--add_force",
-            "--scene_root", "./data/blender_assets/hdri.blend" # TODO: Not sure what the difference is between hdri and hdri_plane
+            "--scene_root", str(DATA_DIR / "blender_assets" / "hdri.blend") # TODO: Not sure what the difference is between hdri and hdri_plane
         ]
     elif mode == 'animal':
         command = common_command + [
             "--type", "animal",
-            "--material_path", "./data/blender_assets/animal_material.blend",
+            "--material_path", str(DATA_DIR / "blender_assets" / "animal_material.blend"),
         ]
 
     output_dir = data_path / mode / f"{slurm_task_index}"
@@ -226,7 +226,7 @@ def main(
         train(data_path, slurm_task_index)
     else:
         with breakpoint_on_error():
-            train(data_path, 0, mode='outdoor', local=True)
+            train(data_path, 0, mode='outdoor', local=False)
     
 if __name__ == '__main__':
     app()

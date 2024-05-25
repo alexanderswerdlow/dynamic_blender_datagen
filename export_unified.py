@@ -1,25 +1,25 @@
 import argparse
 import os
 import subprocess
+from constants import DATA_DIR
 
 def run_command(command):
     print(f"Running command: {command}")
     result = subprocess.run(command, shell=True, capture_output=True, text=True)
     print(result.stdout)
     print(result.stderr)
-    if result.returncode != 0:
-        raise RuntimeError(f"Command failed with return code {result.returncode}: {command}\n{result.stderr}")
+    result.check_returncode()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--type', type=str, default=None)
-    parser.add_argument('--scene_dir', type=str, default='./data/demo_scene/robot.blend')
+    parser.add_argument('--scene_dir', type=str, default=str(DATA_DIR / 'demo_scene/robot.blend' ))
     parser.add_argument('--output_dir', type=str, default='./results/robot_demo')
     parser.add_argument('--use_singularity', default=False, action='store_true')
 
     # rendering settings
     parser.add_argument('--rendering',  default=False, action='store_true')
-    parser.add_argument('--background_hdr_path', type=str, default='./data/hdri/')
+    parser.add_argument('--background_hdr_path', type=str, default=str(DATA_DIR / 'hdri'))
     
     parser.add_argument('--add_fog', default=False, action='store_true')
     parser.add_argument('--fog_path', default='./data/blender_assets/fog.blend', type=str)
@@ -28,7 +28,7 @@ if __name__ == '__main__':
     parser.add_argument('--samples_per_pixel', type=int, default=1024)
     parser.add_argument('--use_gpu',  default=False, action='store_true')
     parser.add_argument('--randomize', default=False, action='store_true')
-    parser.add_argument('--material_path', default='./data/blender_assets/materials.blend', type=str)
+    parser.add_argument('--material_path', default=str(DATA_DIR / 'blender_assets/materials.blend'), type=str)
     parser.add_argument('--skip_n', default=1, type=int)
 
     # exr settings
@@ -47,23 +47,23 @@ if __name__ == '__main__':
 
     # Human
     parser.add_argument('--sampling_points', type=int, default=5000)
-    parser.add_argument('--character_root', type=str, metavar='PATH', default='./data/robots/')
+    parser.add_argument('--character_root', type=str, metavar='PATH', default=str(DATA_DIR / 'robots'))
     parser.add_argument('--use_character', type=str, metavar='PATH', default=None)
-    parser.add_argument('--motion_root', type=str, metavar='PATH', default='./data/motions/')
-    parser.add_argument('--scene_root', type=str, default='./data/blender_assets/hdri_plane.blend')
+    parser.add_argument('--motion_root', type=str, metavar='PATH', default=str(DATA_DIR / 'motions'))
+    parser.add_argument('--scene_root', type=str, default=str(DATA_DIR / 'blender_assets/hdri_plane.blend'))
     parser.add_argument('--indoor_scale', action='store_true', default=False)
-    parser.add_argument('--partnet_root', type=str, metavar='PATH', default='./data/partnet/')
-    parser.add_argument('--gso_root', type=str, metavar='PATH', default='./data/GSO/')
+    parser.add_argument('--partnet_root', type=str, metavar='PATH', default=str(DATA_DIR / 'partnet'))
+    parser.add_argument('--gso_root', type=str, metavar='PATH', default=str(DATA_DIR / 'GSO'))
     parser.add_argument('--render_engine', type=str, default='CYCLES')
     parser.add_argument('--force_num', type=int, default=5)
     parser.add_argument('--add_force', default=False, action='store_true')
     parser.add_argument('--force_step', type=int, default=3)
     parser.add_argument('--force_interval', type=int, default=120)
-    parser.add_argument('--camera_root', type=str, metavar='PATH', default='./data/camera_trajectory/MannequinChallenge')
+    parser.add_argument('--camera_root', type=str, metavar='PATH', default=str(DATA_DIR / 'camera_trajectory/MannequinChallenge'))
     parser.add_argument('--num_assets', type=int, default=5)
 
     # Animal
-    parser.add_argument('--animal_root', type=str, default='./data/deformingthings4d')
+    parser.add_argument('--animal_root', type=str, default=str(DATA_DIR / 'deformingthings4d'))
     parser.add_argument('--add_smoke', default=False, action='store_true')
     parser.add_argument('--animal_name', type=str, metavar='PATH', default=None)
 

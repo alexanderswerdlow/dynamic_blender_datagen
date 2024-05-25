@@ -14,5 +14,7 @@ chmod +x sandbox/.singularity.d/runscript
 # Build a new Singularity image from the sandbox
 singularity build blender_binary.sig sandbox
 
+rm -rf sandbox
+
 # Run the new Singularity image with NVIDIA support
 sudo singularity run --nv blender_binary.sig

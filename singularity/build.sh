@@ -5,7 +5,7 @@ alias singularity='/home/linuxbrew/.linuxbrew/bin/singularity'
 alias sudo="sudo "
 
 # Convert Dockerfile to Singularity definition file
-spython recipe Dockerfile_v2 blender.def
+spython recipe Dockerfile blender.def
 
 # Build the Singularity image
 sudo singularity build --force blender.sif blender.def

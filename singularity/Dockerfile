@@ -29,17 +29,23 @@ RUN apt-get update && apt-get install -y \
 	libfontconfig1 \ 
 	libxrender1 \ 
 	libgl1-mesa-glx \ 
-	xz-utils
+	xz-utils \
+	unzip \
+	nano
+
+COPY build_assets /
+RUN mv build_assets/blender-3.3.1-linux-x64.tar.xz /
+RUN mv build_assets/Python-3.10.5.tgz /
 
 # Download and install Blender
-RUN wget https://mirror.clarkson.edu/blender/release/Blender3.3/blender-3.3.1-linux-x64.tar.xz \
-	&& tar -xvf blender-3.3.1-linux-x64.tar.xz --strip-components=1 -C /bin \
+# wget https://mirror.clarkson.edu/blender/release/Blender3.3/blender-3.3.1-linux-x64.tar.xz
+RUN tar -xvf blender-3.3.1-linux-x64.tar.xz --strip-components=1 -C /bin \
 	&& rm -rf blender-3.3.1-linux-x64.tar.xz \
 	&& rm -rf blender-3.3.1-linux-x64
 
 # Download the Python source since it is not bundled with Blender
-RUN wget https://www.python.org/ftp/python/3.10.5/Python-3.10.5.tgz \
-	&& tar -xzf Python-3.10.5.tgz \
+# wget https://www.python.org/ftp/python/3.10.5/Python-3.10.5.tgz
+RUN tar -xzf Python-3.10.5.tgz \
 	&& cp -r Python-3.10.5/Include/* $BLENDER_PATH/python/include/python3.10/ \
 	&& rm -rf Python-3.10.5.tgz \
 	&& rm -rf Python-3.10.5
@@ -50,5 +56,20 @@ RUN rm -rf ${BLENDER_PATH}/python/lib/python3.10/site-packages/numpy
 # Must first ensurepip to install Blender pip3 and then new numpy
 RUN ${BLENDERPY} -m ensurepip && ${BLENDERPIP} install --upgrade pip && ${BLENDERPIP} install numpy
 
-# Set the working directory
+
+ENV GLOBAL_SCRIPTS_PATH "/usr/share/blender/3.3/scripts"
+RUN mkdir -p $GLOBAL_SCRIPTS_PATH
+RUN mv /build_assets/addons $GLOBAL_SCRIPTS_PATH/
+
+# May not be necessary
+WORKDIR $GLOBAL_SCRIPTS_PATH/addons
+RUN unzip rokoko-studio-live-blender-1-4-1.zip
+RUN unzip Stop-motion-OBJ-v2.2.0-blender-3.6.0.zip
+RUN unzip smplx_blender_addon_300_20220623.zip
+
 WORKDIR /
+
+RUN blender -b --python $GLOBAL_SCRIPTS_PATH/addons/install_addons.py
+
+ENV PYTHONPATH "$PYTHONPATH:$GLOBAL_SCRIPTS_PATH/addons:$GLOBAL_SCRIPTS_PATH/addons/smplx_blender_addon:$GLOBAL_SCRIPTS_PATH/addons/rokoko-studio-live-blender-1-4-1:$GLOBAL_SCRIPTS_PATH/addons/Stop-motion-OBJ"
+

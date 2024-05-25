@@ -508,9 +508,10 @@ class Blender_render():
         # find all the npz file in the folder recursively
         motion_files = glob.glob(os.path.join(self.motion_path, motion_dataset, '**/*.npz'), recursive=True)
         motion_files = [f for f in motion_files]
+        print(f"Number of motion before filter: {len(motion_files)}")
         # filter out too small motion
         motion_files = [f for f in motion_files if os.path.getsize(f) > 1e7]
-        print(f"Number of motion files: {len(motion_files)}")
+        print(f"Number of motion files: {len(motion_files)} in {self.motion_path}{motion_dataset}")
         motion = np.random.choice(motion_files)
         print(f"loading motion {motion}")
 
