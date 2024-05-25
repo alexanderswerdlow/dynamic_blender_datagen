@@ -81,16 +81,6 @@ class Blender_render():
         print("Loading scene from '%s'" % custom_scene)
         bpy.ops.wm.open_mainfile(filepath=custom_scene)
 
-        print(f"Default start/end range: {range(bpy.context.scene.frame_start, bpy.context.scene.frame_end + 1)}, Default FPS: {self.blender_scene.render.fps}", flush=True)
-        
-        if end_frame is not None:
-            self.blender_scene.frame_end = end_frame
-
-        if fps is not None:
-            self.blender_scene.render.fps = fps
-
-        print(f"New start/end range: {range(bpy.context.scene.frame_start, bpy.context.scene.frame_end + 1)}, New FPS: {self.blender_scene.render.fps}", flush=True)
-
         self.obj_set = set(bpy.context.scene.objects)
         self.assets_set = []
         self.gso_force = []
@@ -110,6 +100,14 @@ class Blender_render():
         if background_hdr_path:
             print('loading hdr from:', self.background_hdr_path)
             self.load_background_hdr(self.background_hdr_path)
+
+        try:
+            # Ensure you have the correct context
+            blender_scene = bpy.context.scene
+            # Access the frame_start property
+            print(blender_scene.frame_start)
+        except Exception as e:
+            print(f"An error occurred: {e}")
 
         # save blend file
         os.makedirs(scratch_dir, exist_ok=True)
@@ -523,7 +521,7 @@ class Blender_render():
         motion_files = [f for f in motion_files]
         print(f"Number of motion before filter: {len(motion_files)}")
         # filter out too small motion
-        motion_files = [f for f in motion_files if os.path.getsize(f) > 1e7]
+        motion_files = [f for f in motion_files if os.path.getsize(f) > 5e6]
         print(f"Number of motion files: {len(motion_files)} in {self.motion_path}{motion_dataset}")
         motion = np.random.choice(motion_files)
         print(f"loading motion {motion}")
@@ -752,6 +750,13 @@ class Blender_render():
             bpy.context.scene.camera.keyframe_insert(data_path="rotation_euler", frame=frame_next)
 
     def render(self):
+        print(f"Default start/end range: {range(bpy.context.scene.frame_start, bpy.context.scene.frame_end + 1)}, Default FPS: {bpy.context.scene.render.fps}")
+        
+        bpy.context.scene.frame_end = 11
+        bpy.context.scene.render.fps = 4
+
+        print(f"New start/end range: {range(bpy.context.scene.frame_start, bpy.context.scene.frame_end + 1)}, New FPS: {bpy.context.scene.render.fps}", flush=True)
+
         """Renders all frames (or a subset) of the animation.
         """
         print("Using scratch rendering folder: '%s'" % self.scratch_dir)
@@ -996,6 +1001,7 @@ if __name__ == "__main__":
     parser.add_argument('--start_frame', type=int, default=None)
     parser.add_argument('--end_frame', type=int, default=None)
     parser.add_argument('--fps', type=int, default=None)
+    parser.add_argument('--samples_per_pixel', type=int, default=128)
     args = parser.parse_args(argv)
     print("args:{0}".format(args))
     ## Load the world
@@ -1005,6 +1011,7 @@ if __name__ == "__main__":
     assert args.start_frame == 1 or args.start_frame is None, "Start frame must be 1 or None"
 
     renderer = Blender_render(
+        samples_per_pixel=args.samples_per_pixel,
         scratch_dir=output_dir,
         render_engine=args.render_engine,
         use_gpu=args.use_gpu,

@@ -1,12 +1,13 @@
 import argparse
 import os
-from constants import DATA_DIR
-
-from constants import run_command
-
-from pathlib import Path
-from tap import Tap, to_tap_class
 from dataclasses import dataclass
+from pathlib import Path
+from typing import Optional
+
+from tap import Tap, to_tap_class
+
+from constants import DATA_DIR, run_command
+
 
 @dataclass
 class RenderArgs():
@@ -65,7 +66,7 @@ class RenderArgs():
 
 
 def render(args: RenderArgs):
-    current_path = os.path.dirname(os.path.realpath(__file__))
+    current_path = Path(os.path.dirname(os.path.realpath(__file__)))
     print(f"Current path: {current_path}")
     print(f"Running command: {args.type}")
     print("args:{0}".format(args))
@@ -96,16 +97,8 @@ def render(args: RenderArgs):
                 rendering_script += f' --material_path {args.material_path}'
 
             run_command(rendering_script)
-        if args.exr:
-            exr_script = f'python -m utils.openexr_utils --data_dir {args.output_dir} --output_dir {args.output_dir / exr_img} --batch_size {args.batch_size} --frame_idx {args.frame_idx}'
-            run_command(exr_script)
-        if args.export_obj:
-            obj_script = f'{blender_path} --background --python {current_path}/utils/export_scene.py \
-            -- --scene_root {args.scene_dir} --output_dir {args.output_dir} --export_character {not args.ignore_character} --skip_n {args.skip_n}'
-            run_command(obj_script)
-        if args.export_tracking:
-            tracking_script = f'python -m utils.gen_tracking_indoor --data_root {args.output_dir} --cp_root {args.output_dir} --sampling_scene_points {args.sampling_scene_points} --sampling_character_num {args.sampling_character_num}'
-            run_command(tracking_script)
+
+        
     else:
         if args.rendering:
             if args.type == 'animal':
@@ -137,7 +130,8 @@ def render(args: RenderArgs):
                     f"--render_engine {args.render_engine} --force_num {args.force_num} "
                     f"--force_step {args.force_step} --force_interval {args.force_interval} "
                     f"--end_frame {args.end_frame} "
-                    f"--fps {args.fps}"
+                    f"--fps {args.fps} "
+                    f"--samples_per_pixel {args.samples_per_pixel} "
                 )
                 if args.use_gpu:
                     rendering_script += ' --use_gpu'
@@ -146,17 +140,19 @@ def render(args: RenderArgs):
                 run_command(rendering_script)
             else:
                 raise ValueError('Invalid type')
-        if args.export_obj:
-            obj_script = f'{blender_path} --background --python {current_path}/utils/export_obj.py \
-            -- --scene_root {args.output_dir / "scene.blend"} --output_dir {args.output_dir}'
-            run_command(obj_script)
-        if args.exr:
-            exr_script = f'python -m utils.openexr_utils --data_dir {args.output_dir} --output_dir {args.output_dir}/exr_img --batch_size {args.batch_size} --frame_idx {args.frame_idx}'
-            run_command(exr_script)
 
-        if args.export_tracking:
-            tracking_script = f'python -m utils.gen_tracking --data_root {args.output_dir} --cp_root {args.output_dir} --sampling_points {args.sampling_points} --sampling_scene_points {args.sampling_scene_points}'
-            run_command(tracking_script)
+    if args.export_obj:
+        obj_script = f"{blender_path} --background --python {str(current_path / 'utils' / ('export_scene.py' if args.type is None else 'export_obj.py'))} \
+        -- --scene_root {args.output_dir / 'scene.blend'} --output_dir {args.output_dir}"
+        run_command(obj_script)
+
+    if args.exr:
+        exr_script = f'python -m utils.openexr_utils --data_dir {args.output_dir} --output_dir {args.output_dir}/exr_img --batch_size {args.batch_size} --frame_idx {args.frame_idx}'
+        run_command(exr_script)
+
+    if args.export_tracking:
+        tracking_script = f'python -m utils.gen_tracking_indoor --data_root {args.output_dir} --cp_root {args.output_dir} --outdoor {args.type == "human"}'
+        run_command(tracking_script)
 
 
 if __name__ == '__main__':

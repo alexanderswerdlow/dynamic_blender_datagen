@@ -75,7 +75,7 @@ def get_excluded_nodes(*args):
 def signal_handler(signum, frame):
     raise KeyboardInterrupt
 
-def train(data_path, slurm_task_index, mode=None, local=False):
+def train(data_path, slurm_task_index, mode=None, local=False, existing_output_dir: Optional[Path] = None):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     try:
         job_id = os.getenv('SLURM_JOB_ID')
@@ -101,18 +101,17 @@ def train(data_path, slurm_task_index, mode=None, local=False):
         mode = random.choices(modes, probabilities)[0]
         print(f"Choosing mode {mode} with probability {mode_probabilities[mode]}")
 
-    samples_per_pixel = 32
     args = RenderArgs(
-        rendering=True,
-        exr=True,
-        export_obj=True,
+        rendering=existing_output_dir is None,
+        exr=existing_output_dir is None,
+        export_obj=existing_output_dir is None,
         export_tracking=True,
         use_gpu=True,
-        samples_per_pixel=samples_per_pixel,
+        samples_per_pixel=1,
         sampling_character_num=5000,
         sampling_scene_points=2000,
-        fps=2,
-        end_frame=11,
+        fps=1,
+        end_frame=4,
     )
 
     if local is False:
@@ -132,8 +131,11 @@ def train(data_path, slurm_task_index, mode=None, local=False):
         args.type = "animal"
         args.material_path = DATA_DIR / "blender_assets" / "animal_material.blend"
 
-    while (output_dir := data_path / mode / f"{slurm_task_index}").exists():
-        slurm_task_index += 1
+    if existing_output_dir is not None:
+        output_dir = existing_output_dir
+    else:
+        while (output_dir := data_path / mode / f"{slurm_task_index}").exists():
+            slurm_task_index += 1
 
     output_dir.mkdir(parents=True, exist_ok=True)
     args.output_dir = output_dir
@@ -210,7 +212,8 @@ def main(
         train(data_path, slurm_task_index)
     else:
         with breakpoint_on_error():
-            train(data_path, 0, mode='outdoor', local=False)
+            train(data_path, 0, mode='outdoor', local=True)
+            # , existing_output_dir=Path('/home/aswerdlow/Documents/research/github/point_odyssey/results/outdoor/11')
     
 if __name__ == '__main__':
     app()
