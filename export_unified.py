@@ -1,87 +1,79 @@
 import argparse
 import os
-import subprocess
 from constants import DATA_DIR
 
-def run_command(command):
-    print(f"Running command: {command}")
-    result = subprocess.run(command, shell=True, capture_output=True, text=True)
-    print(result.stdout)
-    print(result.stderr)
-    result.check_returncode()
+from constants import run_command
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser()
-    parser.add_argument('--type', type=str, default=None)
-    parser.add_argument('--scene_dir', type=str, default=str(DATA_DIR / 'demo_scene/robot.blend' ))
-    parser.add_argument('--output_dir', type=str, default='./results/robot_demo')
-    parser.add_argument('--use_singularity', default=False, action='store_true')
+from pathlib import Path
+from tap import Tap, to_tap_class
+from dataclasses import dataclass
+
+@dataclass
+class RenderArgs():
+    type: str = None
+    scene_dir: Path = DATA_DIR / 'demo_scene' / 'robot.blend'
+    output_dir: Path = Path('results') / 'robot_demo'
+    use_singularity: bool = False
 
     # rendering settings
-    parser.add_argument('--rendering',  default=False, action='store_true')
-    parser.add_argument('--background_hdr_path', type=str, default=str(DATA_DIR / 'hdri'))
-    
-    parser.add_argument('--add_fog', default=False, action='store_true')
-    parser.add_argument('--fog_path', default='./data/blender_assets/fog.blend', type=str)
-    parser.add_argument('--start_frame', type=int, default=1)
-    parser.add_argument('--end_frame', type=int, default=1100)
-    parser.add_argument('--samples_per_pixel', type=int, default=1024)
-    parser.add_argument('--use_gpu',  default=False, action='store_true')
-    parser.add_argument('--randomize', default=False, action='store_true')
-    parser.add_argument('--material_path', default=str(DATA_DIR / 'blender_assets/materials.blend'), type=str)
-    parser.add_argument('--skip_n', default=1, type=int)
+    rendering: bool = False
+    background_hdr_path: Path = DATA_DIR / 'hdri'
+    add_fog: bool = False
+    fog_path: Path = DATA_DIR / 'blender_assets' / 'fog.blend'
+    end_frame: int = 1100
+    samples_per_pixel: int = 1024
+    use_gpu: bool = False
+    randomize: bool = False
+    material_path: Path = DATA_DIR / 'blender_assets' / 'materials.blend'
+    fps: Optional[int] = None
 
     # exr settings
-    parser.add_argument('--exr',  default=False, action='store_true')
-    parser.add_argument('--batch_size', type=int, default=64)
-    parser.add_argument('--frame_idx', type=int, default=1)
+    exr: bool = False
+    batch_size: int = 64
+    frame_idx: int = 1
 
     # export obj settings
-    parser.add_argument('--export_obj',  default=False, action='store_true')
-    parser.add_argument('--ignore_character',  default=False, action='store_true')
+    export_obj: bool = False
+    ignore_character: bool = False
 
     # export tracking settings
-    parser.add_argument('--export_tracking',  default=False, action='store_true')
-    parser.add_argument('--sampling_scene_points', type=int, default=20000)
-    parser.add_argument('--sampling_character_num', type=int, default=5000)
+    export_tracking: bool = False
+    sampling_scene_points: int = 20000
+    sampling_character_num: int = 5000
 
     # Human
-    parser.add_argument('--sampling_points', type=int, default=5000)
-    parser.add_argument('--character_root', type=str, metavar='PATH', default=str(DATA_DIR / 'robots'))
-    parser.add_argument('--use_character', type=str, metavar='PATH', default=None)
-    parser.add_argument('--motion_root', type=str, metavar='PATH', default=str(DATA_DIR / 'motions'))
-    parser.add_argument('--scene_root', type=str, default=str(DATA_DIR / 'blender_assets/hdri_plane.blend'))
-    parser.add_argument('--indoor_scale', action='store_true', default=False)
-    parser.add_argument('--partnet_root', type=str, metavar='PATH', default=str(DATA_DIR / 'partnet'))
-    parser.add_argument('--gso_root', type=str, metavar='PATH', default=str(DATA_DIR / 'GSO'))
-    parser.add_argument('--render_engine', type=str, default='CYCLES')
-    parser.add_argument('--force_num', type=int, default=5)
-    parser.add_argument('--add_force', default=False, action='store_true')
-    parser.add_argument('--force_step', type=int, default=3)
-    parser.add_argument('--force_interval', type=int, default=120)
-    parser.add_argument('--camera_root', type=str, metavar='PATH', default=str(DATA_DIR / 'camera_trajectory/MannequinChallenge'))
-    parser.add_argument('--num_assets', type=int, default=5)
+    sampling_points: int = 5000
+    character_root: Path = DATA_DIR / 'robots'
+    use_character: Path = None
+    motion_root: Path = DATA_DIR / 'motions'
+    scene_root: Path = DATA_DIR / 'blender_assets' / 'hdri_plane.blend'
+    indoor_scale: bool = False
+    partnet_root: Path = DATA_DIR / 'partnet'
+    gso_root: Path = DATA_DIR / 'GSO'
+    render_engine: str = 'CYCLES'
+    force_num: int = 5
+    add_force: bool = False
+    force_step: int = 3
+    force_interval: int = 120
+    camera_root: Path = DATA_DIR / 'camera_trajectory' / 'MannequinChallenge'
+    num_assets: int = 5
 
     # Animal
-    parser.add_argument('--animal_root', type=str, default=str(DATA_DIR / 'deformingthings4d'))
-    parser.add_argument('--add_smoke', default=False, action='store_true')
-    parser.add_argument('--animal_name', type=str, metavar='PATH', default=None)
+    animal_root: Path = DATA_DIR / 'deformingthings4d'
+    add_smoke: bool = False
+    animal_name: str = None
 
-    args = parser.parse_args()
+
+def render(args: RenderArgs):
     current_path = os.path.dirname(os.path.realpath(__file__))
-
     print(f"Current path: {current_path}")
     print(f"Running command: {args.type}")
     print("args:{0}".format(args))
 
-    hostname = __import__('socket').gethostname()
-    if 'pop-os' in hostname:
-        singularity_cmd = 'sudo /home/linuxbrew/.linuxbrew/bin/singularity'
-    else:
-        singularity_cmd = 'singularity'
+    singularity_cmd = 'singularity'
 
     pwd = os.getcwd()
-    blender_path = f'{singularity_cmd} run --nv  --bind {pwd}:/root singularity/blender_binary.sig' if args.use_singularity else 'blender'
+    blender_path = f'{singularity_cmd} run --nv singularity/blender_binary.sig' if args.use_singularity else 'blender'
     if args.type is None:
         if args.rendering:
             rendering_script = (
@@ -89,11 +81,9 @@ if __name__ == '__main__':
                 f"--output_dir {args.output_dir} "
                 f"--scene {args.scene_dir} "
                 f"--render_engine CYCLES "
-                f"--start_frame {args.start_frame} "
-                f"--end_frame {args.end_frame} "
                 f"--samples_per_pixel {args.samples_per_pixel} "
                 f"--background_hdr_path {args.background_hdr_path} "
-                f"--skip_n {args.skip_n}"
+                f"--end_frame {args.end_frame} "
             )
             if args.use_gpu:
                 rendering_script += ' --use_gpu'
@@ -107,7 +97,7 @@ if __name__ == '__main__':
 
             run_command(rendering_script)
         if args.exr:
-            exr_script = f'python -m utils.openexr_utils --data_dir {args.output_dir} --output_dir {args.output_dir}/exr_img --batch_size {args.batch_size} --frame_idx {args.frame_idx}'
+            exr_script = f'python -m utils.openexr_utils --data_dir {args.output_dir} --output_dir {args.output_dir / exr_img} --batch_size {args.batch_size} --frame_idx {args.frame_idx}'
             run_command(exr_script)
         if args.export_obj:
             obj_script = f'{blender_path} --background --python {current_path}/utils/export_scene.py \
@@ -118,7 +108,6 @@ if __name__ == '__main__':
             run_command(tracking_script)
     else:
         if args.rendering:
-            assert args.skip_n == 1
             if args.type == 'animal':
                 rendering_script = (
                     f"{blender_path} --background --python {current_path}/render_animal.py -- "
@@ -147,6 +136,8 @@ if __name__ == '__main__':
                     f"--camera_root {args.camera_root} --num_assets {args.num_assets} "
                     f"--render_engine {args.render_engine} --force_num {args.force_num} "
                     f"--force_step {args.force_step} --force_interval {args.force_interval} "
+                    f"--end_frame {args.end_frame} "
+                    f"--fps {args.fps}"
                 )
                 if args.use_gpu:
                     rendering_script += ' --use_gpu'
@@ -157,7 +148,7 @@ if __name__ == '__main__':
                 raise ValueError('Invalid type')
         if args.export_obj:
             obj_script = f'{blender_path} --background --python {current_path}/utils/export_obj.py \
-            -- --scene_root {os.path.join(args.output_dir, "scene.blend")} --output_dir {args.output_dir}'
+            -- --scene_root {args.output_dir / "scene.blend"} --output_dir {args.output_dir}'
             run_command(obj_script)
         if args.exr:
             exr_script = f'python -m utils.openexr_utils --data_dir {args.output_dir} --output_dir {args.output_dir}/exr_img --batch_size {args.batch_size} --frame_idx {args.frame_idx}'
@@ -167,3 +158,9 @@ if __name__ == '__main__':
             tracking_script = f'python -m utils.gen_tracking --data_root {args.output_dir} --cp_root {args.output_dir} --sampling_points {args.sampling_points} --sampling_scene_points {args.sampling_scene_points}'
             run_command(tracking_script)
 
+
+if __name__ == '__main__':
+    RenderTap = to_tap_class(RenderArgs)
+    tap = RenderTap(description=__doc__)  # from the top of this script
+    args = tap.parse_args()
+    render(RenderArgs(**args.as_dict()))

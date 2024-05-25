@@ -367,13 +367,18 @@ class Blender_render():
 
         # set samples per pixel
         bpy.context.scene.cycles.samples = self.samples_per_pixel
+
         if start_frame is None:
             start_frame = bpy.context.scene.frame_start
         if end_frame is None:
             end_frame = bpy.context.scene.frame_end + 1
-        frames = range(start_frame, end_frame)
+
+        frames = range(start_frame, end_frame, skip_n)
         assert frames[0] == bpy.context.scene.frame_start, f"Frames do not start at {bpy.context.scene.frame_start}, but {frames[0]} was passed in"
         assert frames[-1] <= bpy.context.scene.frame_end + 1, f"Frames do not end at {bpy.context.scene.frame_end + 1}, but {frames[-1]} was passed in"
+
+        print(f"Default start/end range: {range(bpy.context.scene.frame_start, bpy.context.scene.frame_end + 1)}")
+        print(f"Rendering frame range: {frames}")
 
         use_multiview = self.views > 1
         if not use_multiview:
@@ -391,8 +396,9 @@ class Blender_render():
                 np.savetxt(os.path.join(camera_save_dir, f"RT_{frame_nr:04d}.txt"), modelview_matrix)
                 np.savetxt(os.path.join(camera_save_dir, f"K_{frame_nr:04d}.txt"), K)
 
-                exr_path = Path(os.path.join(self.scratch_dir, "exr", "frame_{:04d}.exr".format(actual_frame_idx)))
-                exr_path.rename(os.path.join(self.scratch_dir, "exr", "frame_{:04d}.exr".format(frame_nr)))
+                if skip_n != 1:
+                    exr_path = Path(os.path.join(self.scratch_dir, "exr", "frame_{:04d}.exr".format(actual_frame_idx)))
+                    exr_path.rename(os.path.join(self.scratch_dir, "exr", "frame_{:04d}.exr".format(frame_nr)))
 
                 print("Rendered frame '%s'" % bpy.context.scene.render.filepath)
         else:

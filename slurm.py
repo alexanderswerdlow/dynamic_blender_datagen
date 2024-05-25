@@ -17,7 +17,8 @@ from datetime import datetime, timedelta
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
-from constants import DATA_DIR
+from constants import DATA_DIR, run_command
+from export_unified import render, RenderArgs
 
 import numpy as np
 import torch
@@ -101,59 +102,43 @@ def train(data_path, slurm_task_index, mode=None, local=False):
         print(f"Choosing mode {mode} with probability {mode_probabilities[mode]}")
 
     samples_per_pixel = 32
-    common_command = [
-        "python", "export_unified.py",
-        "--rendering",
-        "--exr",
-        "--export_obj",
-        "--export_tracking",
-        "--use_gpu",
-        "--samples_per_pixel", f"{samples_per_pixel}",
-        "--sampling_character_num", "5000",
-        "--sampling_scene_points", "2000",
-        "--start_frame", "1",
-        "--end_frame", "11",
-    ]
+    args = RenderArgs(
+        rendering=True,
+        exr=True,
+        export_obj=True,
+        export_tracking=True,
+        use_gpu=True,
+        samples_per_pixel=samples_per_pixel,
+        sampling_character_num=5000,
+        sampling_scene_points=2000,
+        fps=2,
+        end_frame=11,
+    )
 
     if local is False:
-        common_command = common_command + [
-            "--use_singularity",
-        ]
+        args.use_singularity = True
 
     if mode == 'indoor':
-        command = common_command + [
-            "--add_fog",
-            "--randomize",
-            "--add_force",
-        ]
+        args.add_fog = True
+        args.randomize = True
+        args.add_force = True
     elif mode == 'robot':
-        command = common_command + [
-            "--scene_dir", str(DATA_DIR / "demo_scene" / "robot.blend"),
-        ]
+        args.scene_dir = DATA_DIR / "demo_scene" / "robot.blend"
     elif mode == 'outdoor':
-        command = common_command + [
-            "--type", "human",
-            "--add_force",
-            "--scene_root", str(DATA_DIR / "blender_assets" / "hdri.blend") # TODO: Not sure what the difference is between hdri and hdri_plane
-        ]
+        args.type = "human"
+        args.add_force = True
+        args.scene_root = DATA_DIR / "blender_assets" / "hdri.blend"
     elif mode == 'animal':
-        command = common_command + [
-            "--type", "animal",
-            "--material_path", str(DATA_DIR / "blender_assets" / "animal_material.blend"),
-        ]
+        args.type = "animal"
+        args.material_path = DATA_DIR / "blender_assets" / "animal_material.blend"
 
-    output_dir = data_path / mode / f"{slurm_task_index}"
+    while (output_dir := data_path / mode / f"{slurm_task_index}").exists():
+        slurm_task_index += 1
+
     output_dir.mkdir(parents=True, exist_ok=True)
-    command = command + [
-        "--output_dir", output_dir,
-    ]
+    args.output_dir = output_dir
 
-    print(f"SLURM Running command: {command}")
-    result = subprocess.run(command, capture_output=True, text=True)
-    print(result.stdout)
-    print(result.stderr)
-    if result.returncode != 0:
-        raise RuntimeError(f"Command failed with return code {result.returncode}: {result.stderr}")
+    render(args)
     
 
 def tail_log_file(log_file_path, glob_str):
@@ -205,7 +190,6 @@ def run_slurm(data_path, num_chunks, num_workers, partition, exclude: bool = Fal
     tail_log_file(Path(f"outputs"), f"{job_id}*")
 
 import typer
-
 typer.main.get_command_name = lambda name: name
 app = typer.Typer(pretty_exceptions_show_locals=False)
 

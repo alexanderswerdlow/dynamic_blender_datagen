@@ -22,29 +22,32 @@ np.random.seed(int(time.time()))
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 class Blender_render():
-    def __init__(self,
-                 scratch_dir=None,
-                 partnet_path=None,
-                 GSO_path=None,
-                 character_path=None,
-                 use_character=None,
-                 motion_path=None,
-                 camera_path=None,
-                 render_engine='BLENDER_EEVEE',
-                 adaptive_sampling=False,
-                 use_denoising=True,
-                 samples_per_pixel=128,
-                 num_assets=2,
-                 background_hdr_path=None,
-                 custom_scene=None,
-                 use_gpu: bool = False,
-                 use_indoor_cam: bool = False,
-                 add_force: bool = False,
-                 force_step: int = 3,
-                 force_num: int = 3,
-                 force_interval: int = 200,
-                 views: int = 1,
-                 ):
+    def __init__(
+        self,
+        scratch_dir=None,
+        partnet_path=None,
+        GSO_path=None,
+        character_path=None,
+        use_character=None,
+        motion_path=None,
+        camera_path=None,
+        render_engine='BLENDER_EEVEE',
+        adaptive_sampling=False,
+        use_denoising=True,
+        samples_per_pixel=128,
+        num_assets=2,
+        background_hdr_path=None,
+        custom_scene=None,
+        use_gpu: bool = False,
+        use_indoor_cam: bool = False,
+        add_force: bool = False,
+        force_step: int = 3,
+        force_num: int = 3,
+        force_interval: int = 200,
+        views: int = 1,
+        end_frame: int = None,
+        fps: Optional[int] = None,
+    ):
         self.blender_scene = bpy.context.scene
         self.render_engine = render_engine
         self.use_gpu = use_gpu
@@ -63,8 +66,8 @@ class Blender_render():
         self.GSO_path = GSO_path
         self.camera_path = camera_path
         self.motion_path = motion_path
-        # self.motion_dataset = ['CMU'] # ['TotalCapture', 'DanceDB', 'CMU', 'MoSh', 'SFU']
-        self.motion_dataset = [d.name for d in Path(motion_path).iterdir() if d.is_dir()]
+
+        self.motion_datasets = [d.name for d in Path(motion_path).iterdir() if d.is_dir()]
         self.motion_speed = {'TotalCapture': 1 / 1.5, 'DanceDB': 1.0, 'CMU': 1.0, 'MoSh': 1.0 / 1.2, 'SFU': 1.0 / 1.2}
 
         self.force_step = force_step
@@ -77,6 +80,16 @@ class Blender_render():
         assert custom_scene is not None
         print("Loading scene from '%s'" % custom_scene)
         bpy.ops.wm.open_mainfile(filepath=custom_scene)
+
+        print(f"Default start/end range: {range(bpy.context.scene.frame_start, bpy.context.scene.frame_end + 1)}, Default FPS: {self.blender_scene.render.fps}", flush=True)
+        
+        if end_frame is not None:
+            self.blender_scene.frame_end = end_frame
+
+        if fps is not None:
+            self.blender_scene.render.fps = fps
+
+        print(f"New start/end range: {range(bpy.context.scene.frame_start, bpy.context.scene.frame_end + 1)}, New FPS: {self.blender_scene.render.fps}", flush=True)
 
         self.obj_set = set(bpy.context.scene.objects)
         self.assets_set = []
@@ -504,7 +517,7 @@ class Blender_render():
 
     def retarget_smplx2skeleton(self, mapping):
         # get source motion
-        motion_dataset = np.random.choice(self.motion_dataset)
+        motion_dataset = np.random.choice(self.motion_datasets)
         # find all the npz file in the folder recursively
         motion_files = glob.glob(os.path.join(self.motion_path, motion_dataset, '**/*.npz'), recursive=True)
         motion_files = [f for f in motion_files]
@@ -521,13 +534,13 @@ class Blender_render():
         smplx_skeleton = smplx.parent
 
         # slow down the motion
-        speed_scale = self.motion_speed[motion_dataset]
+        speed_scale = self.motion_speed[motion_dataset] if motion_dataset in self.motion_speed else 1.0
         bpy.context.scene.frame_end = int(bpy.context.scene.frame_end / speed_scale)
         for fcurve in smplx_skeleton.animation_data.action.fcurves:
             for keyframe in fcurve.keyframe_points:
                 keyframe.co[0] = keyframe.co[0] / speed_scale
 
-
+        print(f"Re-targeting...")
         bpy.context.scene.rsl_retargeting_armature_source = smplx_skeleton
         bpy.context.scene.rsl_retargeting_armature_target = self.skeleton
         bpy.ops.rsl.build_bone_list()
@@ -738,7 +751,7 @@ class Blender_render():
             bpy.context.scene.camera.keyframe_insert(data_path="location", frame=frame_next)
             bpy.context.scene.camera.keyframe_insert(data_path="rotation_euler", frame=frame_next)
 
-    def render(self, start_frame=None, end_frame=None, skip_n=1):
+    def render(self):
         """Renders all frames (or a subset) of the animation.
         """
         print("Using scratch rendering folder: '%s'" % self.scratch_dir)
@@ -752,13 +765,7 @@ class Blender_render():
 
         absolute_path = os.path.abspath(self.scratch_dir)
 
-        if start_frame is None:
-            start_frame = bpy.context.scene.frame_start
-        if end_frame is None:
-            end_frame = bpy.context.scene.frame_end + 1
-        frames = range(start_frame, end_frame)
-        assert frames[0] == bpy.context.scene.frame_start, f"Frames do not start at {bpy.context.scene.frame_start}, but {frames[0]} was passed in"
-        assert frames[-1] <= bpy.context.scene.frame_end + 1, f"Frames do not end at {bpy.context.scene.frame_end + 1}, but {frames[-1]} was passed in"
+        frames = range(bpy.context.scene.frame_start, bpy.context.scene.frame_end + 1)
 
         # add forces
         for frame_nr in frames:
@@ -977,7 +984,6 @@ if __name__ == "__main__":
     parser.add_argument('--output_name', type=str, metavar='PATH',
                         help='img save name',
                         default='test')
-    # parser.add_argument('--start_frame', type=int, default=0)
     parser.add_argument('--force_step', type=int, default=3)
     parser.add_argument('--force_interval', type=int, default=120)
     parser.add_argument('--force_num', type=int, default=3)
@@ -989,20 +995,38 @@ if __name__ == "__main__":
     parser.add_argument('--render_engine', type=str, default='CYCLES', choices=['BLENDER_EEVEE', 'CYCLES'])
     parser.add_argument('--start_frame', type=int, default=None)
     parser.add_argument('--end_frame', type=int, default=None)
-    parser.add_argument('--skip_n', type=int, default=1)
+    parser.add_argument('--fps', type=int, default=None)
     args = parser.parse_args(argv)
     print("args:{0}".format(args))
-
     ## Load the world
     output_dir = args.output_dir
     os.makedirs(output_dir, exist_ok=True)
 
-    renderer = Blender_render(scratch_dir=output_dir, render_engine=args.render_engine, use_gpu=args.use_gpu, character_path=args.character_root, motion_path=args.motion_root,
-                              camera_path=args.camera_root, background_hdr_path=args.background_hdr_path, GSO_path=args.gso_root, num_assets=args.num_assets,
-                              custom_scene=args.scene_root, use_indoor_cam=args.indoor, partnet_path=args.partnet_root, use_character=args.use_character,
-                              add_force=args.add_force, force_step=args.force_step, force_interval=args.force_interval, force_num=args.force_num,
-                              views=args.views)
+    assert args.start_frame == 1 or args.start_frame is None, "Start frame must be 1 or None"
 
-    renderer.render(start_frame=args.start_frame, end_frame=args.end_frame, skip_n=args.skip_n)
+    renderer = Blender_render(
+        scratch_dir=output_dir,
+        render_engine=args.render_engine,
+        use_gpu=args.use_gpu,
+        character_path=args.character_root,
+        motion_path=args.motion_root,
+        camera_path=args.camera_root,
+        background_hdr_path=args.background_hdr_path,
+        GSO_path=args.gso_root,
+        num_assets=args.num_assets,
+        custom_scene=args.scene_root,
+        use_indoor_cam=args.indoor,
+        partnet_path=args.partnet_root,
+        use_character=args.use_character,
+        add_force=args.add_force,
+        force_step=args.force_step,
+        force_interval=args.force_interval,
+        force_num=args.force_num,
+        views=args.views,
+        end_frame=args.end_frame,
+        fps=args.fps,
+    )
+
+    renderer.render()
 
 

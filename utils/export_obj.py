@@ -15,15 +15,15 @@ else:
 print("argsv:{0}".format(argv))
 parser = argparse.ArgumentParser(description='Export obj data')
 
-parser.add_argument('--scene_root', type=str,
-                    default='')
-parser.add_argument('--output_dir', type=str, metavar='PATH', default='./',
-                    help='img save dir')
+parser.add_argument('--scene_root', type=str, default='')
+parser.add_argument('--output_dir', type=str, metavar='PATH', default='./', help='img save dir')
 args = parser.parse_args(argv)
 print("args:{0}".format(args))
 
 bpy.ops.wm.open_mainfile(filepath=args.scene_root)
 frames = range(bpy.context.scene.frame_start, bpy.context.scene.frame_end + 1)
+print(f"Loaded frame range: {frames}")
+print(f"Loaded frame FPS: {bpy.context.scene.render.fps}")
 
 assets_keys = bpy.data.objects.keys()
 assets_keys = [key for key in assets_keys if
