@@ -204,6 +204,8 @@ def main(
     is_slurm_task: bool = False,
     slurm_task_index: int = None,
     partition: str = 'all',
+    existing_output_dir: Optional[Path] = None, # Path('/home/aswerdlow/Documents/research/github/point_odyssey/results/outdoor/1')
+    local: bool = False,
 ):
     if use_slurm:
         run_slurm(data_path, num_to_process, num_workers, partition)
@@ -212,8 +214,7 @@ def main(
         train(data_path, slurm_task_index)
     else:
         with breakpoint_on_error():
-            train(data_path, 0, mode='outdoor', local=False, existing_output_dir=Path('/home/aswerdlow/Documents/research/github/point_odyssey/results/outdoor/1'))
-            # , 
+            train(data_path=data_path, slurm_task_index=0, mode='outdoor', local=local, existing_output_dir=existing_output_dir)
     
 if __name__ == '__main__':
     app()

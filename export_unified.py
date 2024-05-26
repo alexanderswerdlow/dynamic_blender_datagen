@@ -67,14 +67,11 @@ class RenderArgs():
 
 def render(args: RenderArgs):
     current_path = Path(os.path.dirname(os.path.realpath(__file__)))
+    print(f"Render args: {args}")
     print(f"Current path: {current_path}")
     print(f"Running command: {args.type}")
-    print("args:{0}".format(args))
-
-    singularity_cmd = 'singularity'
-
-    pwd = os.getcwd()
-    blender_path = f'{singularity_cmd} run --bind $(pwd)/singularity/config:/.config --nv singularity/blender_binary.sig' if args.use_singularity else 'blender'
+    
+    blender_path = f'singularity run --bind {os.getcwd()}/singularity/config:/.config --nv singularity/blender_binary.sig' if args.use_singularity else 'blender'
     if args.type is None:
         if args.rendering:
             rendering_script = (

@@ -95,8 +95,10 @@ class Blender_render():
         self.exr_output_node = self.set_up_exr_output_node()
 
         self.views = views
+        self.end_frame = end_frame
+        self.fps = fps
 
-        # self.blender_scene.render.resolution_percentage = 100
+        # self.blender_scene.render.resolution_percentage = 10
         if background_hdr_path:
             print('loading hdr from:', self.background_hdr_path)
             self.load_background_hdr(self.background_hdr_path)
@@ -752,8 +754,8 @@ class Blender_render():
     def render(self):
         print(f"Default start/end range: {range(bpy.context.scene.frame_start, bpy.context.scene.frame_end + 1)}, Default FPS: {bpy.context.scene.render.fps}")
         
-        bpy.context.scene.frame_end = 11
-        bpy.context.scene.render.fps = 4
+        bpy.context.scene.frame_end = self.end_frame
+        bpy.context.scene.render.fps = self.fps
 
         print(f"New start/end range: {range(bpy.context.scene.frame_start, bpy.context.scene.frame_end + 1)}, New FPS: {bpy.context.scene.render.fps}", flush=True)
 

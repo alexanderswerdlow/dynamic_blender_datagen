@@ -78,4 +78,7 @@ ENV PYTHONPATH "$PYTHONPATH:$GLOBAL_SCRIPTS_PATH/addons:$GLOBAL_SCRIPTS_PATH/add
 COPY requirements.txt /
 RUN ${BLENDERPIP} install -r /requirements.txt
 RUN ${BLENDERPIP} install git+https://github.com/alexanderswerdlow/image_utils.git@511d72c841dc732dd529c3627b0fab0466e622c6 --no-deps
-RUN mv .config .default_config
+
+# We trick blender into thinking we have the config folder but really we later bind mount it so it's writeable
+# Ideally, we would use a writeable overlay, but our cluster doesn't support this
+RUN rm -rf /.config
