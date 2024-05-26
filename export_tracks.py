@@ -344,7 +344,7 @@ def tracking(cp_root: Path, data_root: Path, outdoor=False):
     RT_data = RT_data.astype(np.float16)
 
     # save annotations as npz
-    np.savez(
+    np.savez_compressed(
         os.path.join(data_root, 'annotations.npz'),
         intrinsics=K_data,
         extrinsics=RT_data,

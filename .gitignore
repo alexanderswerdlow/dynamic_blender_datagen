@@ -179,3 +179,4 @@ build_assets/
 blender.def
 singularity/config
 singularity/overlay.img
+results_large/

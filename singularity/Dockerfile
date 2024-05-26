@@ -74,6 +74,7 @@ WORKDIR /
 RUN blender -b --python $GLOBAL_SCRIPTS_PATH/addons/install_addons.py
 
 ENV PYTHONPATH "$PYTHONPATH:$GLOBAL_SCRIPTS_PATH/addons:$GLOBAL_SCRIPTS_PATH/addons/smplx_blender_addon:$GLOBAL_SCRIPTS_PATH/addons/rokoko-studio-live-blender-1-4-1:$GLOBAL_SCRIPTS_PATH/addons/Stop-motion-OBJ"
+ENV PATH "$PATH:/home/aswerdlow/.local/bin"
 
 COPY requirements.txt /
 RUN ${BLENDERPIP} install -r /requirements.txt

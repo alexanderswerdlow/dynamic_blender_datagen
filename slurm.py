@@ -8,6 +8,7 @@ sys.path.insert(0, "/home/aswerdlo/repos/point_odyssey")
 
 import io
 import os
+import random
 import signal
 import socket
 import subprocess
@@ -17,12 +18,13 @@ from datetime import datetime, timedelta
 from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Optional
-from constants import DATA_DIR, run_command
-from export_unified import render, RenderArgs
 
 import numpy as np
 import torch
 from tqdm import tqdm
+
+from constants import DATA_DIR, run_command
+from export_unified import RenderArgs, render
 
 node_gpus = {
     "matrix-0-16": "titanx",
@@ -75,6 +77,11 @@ def get_excluded_nodes(*args):
 def signal_handler(signum, frame):
     raise KeyboardInterrupt
 
+def random_choice(objects, weights):
+    total_weight = sum(weights)
+    probabilities = [w / total_weight for w in weights]
+    return random.choices(objects, probabilities)[0]
+
 def train(data_path, slurm_task_index, mode=None, local=False, existing_output_dir: Optional[Path] = None):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     try:
@@ -107,11 +114,9 @@ def train(data_path, slurm_task_index, mode=None, local=False, existing_output_d
         export_obj=existing_output_dir is None,
         export_tracking=True,
         use_gpu=True,
-        samples_per_pixel=1,
-        sampling_character_num=5000,
-        sampling_scene_points=2000,
-        fps=1,
-        end_frame=4,
+        samples_per_pixel=4,
+        fps=32,
+        end_frame=512,
     )
 
     if local is False:
@@ -125,8 +130,18 @@ def train(data_path, slurm_task_index, mode=None, local=False, existing_output_d
         args.scene_dir = DATA_DIR / "demo_scene" / "robot.blend"
     elif mode == 'outdoor':
         args.type = "human"
-        args.add_force = True
-        args.scene_root = DATA_DIR / "blender_assets" / "hdri.blend"
+        args.add_smoke = False
+        args.add_fog = False
+        args.num_assets = random_choice([2, 5, 8, 10, 15], [0.2, 0.2, 0.5, 0.5, 0.05])
+        args.add_force = random_choice([True, False], [0.5, 0.5])
+        args.force_interval = random_choice(
+            [args.end_frame // 1, args.end_frame // 2, args.end_frame // 4, args.end_frame // 8, args.end_frame // 16],
+            [0.3, 0.5, 0.2, 0.05, 0.05]
+        )
+        args.force_step = random_choice([1, 2, 3, 4, 5], [0.6, 0.3, 0.2, 0.05, 0.05])
+        args.force_scale = random_choice([0.05, 0.1, 0.25, 0.4, 0.6, 1.0], [0.6, 0.4, 0.2, 0.05, 0.05, 0.05])
+        args.randomize = True
+        args.scene_root = DATA_DIR / "blender_assets" / random_choice(["hdri.blend", "hdri_plane.blend"], [0.5, 0.5])
     elif mode == 'animal':
         args.type = "animal"
         args.material_path = DATA_DIR / "blender_assets" / "animal_material.blend"
@@ -139,8 +154,21 @@ def train(data_path, slurm_task_index, mode=None, local=False, existing_output_d
 
     output_dir.mkdir(parents=True, exist_ok=True)
     args.output_dir = output_dir
+    
+    with open(output_dir / "slurm_metadata.txt", "w") as f:
+        f.write(f"{os.getpid()} {socket.gethostname()} {device} {job_id} {addr}\n")
+        slurm_env_vars = [
+            "SLURM_JOB_ID", "SLURM_ARRAY_JOB_ID", "SLURM_ARRAY_TASK_ID",
+            "SLURM_JOB_NODELIST", "SLURM_SUBMIT_DIR", "SLURM_CLUSTER_NAME"
+        ]
+        for var in slurm_env_vars:
+            f.write(f"{var}={os.getenv(var, 'Not Set')}\n")
+
+        for field in args.__dataclass_fields__:
+            f.write(f"{field} = {getattr(args, field)}\n")
 
     render(args)
+    print(f"Finished rendering {output_dir}")
     
 
 def tail_log_file(log_file_path, glob_str):
@@ -176,9 +204,9 @@ def run_slurm(data_path, num_chunks, num_workers, partition, exclude: bool = Fal
     print(kwargs)
     slurm = Slurm(
         "--requeue=10",
-        job_name='image_folder_parallel',
-        cpus_per_task=4,
-        mem='8g',
+        job_name='blender',
+        cpus_per_task=3,
+        mem='16g',
         export='ALL',
         gres=['gpu:1'],
         output=f'outputs/{Slurm.JOB_ARRAY_MASTER_ID}_{Slurm.JOB_ARRAY_ID}.out',
@@ -192,6 +220,7 @@ def run_slurm(data_path, num_chunks, num_workers, partition, exclude: bool = Fal
     tail_log_file(Path(f"outputs"), f"{job_id}*")
 
 import typer
+
 typer.main.get_command_name = lambda name: name
 app = typer.Typer(pretty_exceptions_show_locals=False)
 
@@ -204,7 +233,7 @@ def main(
     is_slurm_task: bool = False,
     slurm_task_index: int = None,
     partition: str = 'all',
-    existing_output_dir: Optional[Path] = None, # Path('/home/aswerdlow/Documents/research/github/point_odyssey/results/outdoor/1')
+    existing_output_dir: Optional[Path] = None,
     local: bool = False,
 ):
     if use_slurm:

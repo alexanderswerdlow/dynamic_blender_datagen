@@ -2,6 +2,7 @@ import argparse
 import os
 from dataclasses import dataclass
 from pathlib import Path
+import shutil
 from typing import Optional
 
 from tap import Tap, to_tap_class
@@ -27,6 +28,7 @@ class RenderArgs():
     randomize: bool = False
     material_path: Path = DATA_DIR / 'blender_assets' / 'materials.blend'
     fps: Optional[int] = None
+    remove_temporary_files: bool = True
 
     # exr settings
     exr: bool = False
@@ -56,6 +58,7 @@ class RenderArgs():
     add_force: bool = False
     force_step: int = 3
     force_interval: int = 120
+    force_scale: float = 1.0
     camera_root: Path = DATA_DIR / 'camera_trajectory' / 'MannequinChallenge'
     num_assets: int = 5
 
@@ -71,7 +74,7 @@ def render(args: RenderArgs):
     print(f"Current path: {current_path}")
     print(f"Running command: {args.type}")
     
-    blender_path = f'singularity run --bind {os.getcwd()}/singularity/config:/.config --nv singularity/blender_binary.sig' if args.use_singularity else 'blender'
+    blender_path = f'singularity run --bind {os.getcwd()}/singularity/config:/.config --nv singularity/blender.sif' if args.use_singularity else 'blender'
     if args.type is None:
         if args.rendering:
             rendering_script = (
@@ -89,13 +92,11 @@ def render(args: RenderArgs):
                 rendering_script += ' --add_fog'
                 rendering_script += f' --fog_path {args.fog_path}'
             if args.randomize:
-                rendering_script += ' --randomize'
+                rendering_script += ' --randomize '
             if args.material_path is not None:
                 rendering_script += f' --material_path {args.material_path}'
 
             run_command(rendering_script)
-
-        
     else:
         if args.rendering:
             if args.type == 'animal':
@@ -132,8 +133,17 @@ def render(args: RenderArgs):
                 )
                 if args.use_gpu:
                     rendering_script += ' --use_gpu'
-                if args.indoor_scale:
-                    rendering_script += ' --indoor'
+                if args.add_fog:
+                    rendering_script += ' --add_fog'
+                    rendering_script += f' --fog_path {args.fog_path}'
+                if args.randomize:
+                    rendering_script += ' --randomize'
+                if args.material_path is not None:
+                    rendering_script += f' --material_path {args.material_path}'
+                if args.add_smoke:
+                    rendering_script += ' --add_smoke'
+                if args.add_force:
+                    rendering_script += ' --add_force'
                 run_command(rendering_script)
             else:
                 raise ValueError('Invalid type')
@@ -143,14 +153,28 @@ def render(args: RenderArgs):
         -- --scene_root {args.output_dir / 'scene.blend'} --output_dir {args.output_dir}"
         run_command(obj_script)
 
-    python_path = f'singularity exec --bind {os.getcwd()}/singularity/config:/.config --nv singularity/blender_binary.sig ' if args.use_singularity else ''
+    python_path = f'singularity exec --bind {os.getcwd()}/singularity/config:/.config --nv singularity/blender.sif ' if args.use_singularity else ''
     if args.exr:
         exr_script = f"{python_path}/bin/bash -c '$BLENDERPY {str(current_path / 'utils' / 'openexr_utils.py')} --data_dir {args.output_dir} --output_dir {args.output_dir}/exr_img --batch_size {args.batch_size} --frame_idx {args.frame_idx}'"
         run_command(exr_script)
 
     if args.export_tracking:
-        tracking_script = f"{python_path}/bin/bash -c '$BLENDERPY {str(current_path / 'utils' / 'gen_tracking_indoor.py')} --data_root {args.output_dir} --cp_root {args.output_dir} {'--outdoor' if args.type == 'human' else ''}'"
+        tracking_script = f"{python_path}/bin/bash -c '$BLENDERPY {str(current_path / 'export_tracks.py')} --data_root {args.output_dir} --cp_root {args.output_dir} {'--outdoor' if args.type == 'human' else ''}'"
         run_command(tracking_script)
+
+    if args.remove_temporary_files:
+        exr_img_path = args.output_dir / 'exr_img'
+        exr_path = args.output_dir / 'exr'
+
+        if exr_img_path.exists():
+            shutil.rmtree(exr_img_path)
+        else:
+            raise ValueError(f"exr_img_path {exr_img_path} does not exist")
+        
+        if exr_path.exists():
+            shutil.rmtree(exr_path)
+        else:
+            raise ValueError(f"exr_path {exr_path} does not exist")
 
 
 if __name__ == '__main__':

@@ -47,11 +47,31 @@ class Blender_render():
         views: int = 1,
         end_frame: int = None,
         fps: Optional[int] = None,
+        randomize: bool = False,
+        add_fog: bool = False,
+        fog_path: Optional[str] = None,
+        add_smoke: bool = False,
+        material_path: Optional[str] = None,
+        force_scale: Optional[float] = 1.0
     ):
         self.blender_scene = bpy.context.scene
         self.render_engine = render_engine
         self.use_gpu = use_gpu
-        self.scale_factor = 10 if not use_indoor_cam else 1
+        self.scale_factor = (10 if not use_indoor_cam else 1) * force_scale
+        self.force_step = force_step
+        self.force_num = force_num
+        self.force_interval = force_interval
+        self.add_force = add_force
+        self.views = views
+        self.end_frame = end_frame
+        self.fps = fps
+        self.randomize = randomize
+        self.add_fog = add_fog
+        self.fog_path = fog_path
+        self.add_smoke = add_smoke
+        self.material_path = material_path
+
+        self.num_assets = num_assets
 
         self.set_render_engine()
         hdr_list = os.listdir(background_hdr_path)
@@ -70,16 +90,18 @@ class Blender_render():
         self.motion_datasets = [d.name for d in Path(motion_path).iterdir() if d.is_dir()]
         self.motion_speed = {'TotalCapture': 1 / 1.5, 'DanceDB': 1.0, 'CMU': 1.0, 'MoSh': 1.0 / 1.2, 'SFU': 1.0 / 1.2}
 
-        self.force_step = force_step
-        self.force_num = force_num
-        self.force_interval = force_interval
-        self.add_force = add_force
 
-        self.num_assets = num_assets
-        # set scene
+        custom_scene = Path(custom_scene)
         assert custom_scene is not None
         print("Loading scene from '%s'" % custom_scene)
-        bpy.ops.wm.open_mainfile(filepath=custom_scene)
+        
+        if custom_scene.is_dir():
+            blend_files = glob.glob(custom_scene / '**/*.blend', recursive=True)
+            assert len(blend_files) > 0, "No .blend files found in the specified directory"
+            custom_scene = np.random.choice(blend_files)
+            print("Randomly selected scene file: '%s'" % custom_scene)
+        
+        bpy.ops.wm.open_mainfile(filepath=str(custom_scene))
 
         self.obj_set = set(bpy.context.scene.objects)
         self.assets_set = []
@@ -94,14 +116,16 @@ class Blender_render():
 
         self.exr_output_node = self.set_up_exr_output_node()
 
-        self.views = views
-        self.end_frame = end_frame
-        self.fps = fps
-
+        
         # self.blender_scene.render.resolution_percentage = 10
         if background_hdr_path:
             print('loading hdr from:', self.background_hdr_path)
             self.load_background_hdr(self.background_hdr_path)
+
+        if self.randomize and os.path.exists(self.material_path):
+            self.randomize_scene()
+        if self.add_fog and os.path.exists(self.fog_path):
+            self.load_fog()
 
         try:
             # Ensure you have the correct context
@@ -140,6 +164,42 @@ class Blender_render():
                 print("Device '{}' type {} : {}".format(d.name, d.type, d.use))
             print('setting up gpu done')
             print("----------------------------------------------")
+
+    def load_fog(self):
+        print("Loading fog")
+        # append the fod file
+        bpy.ops.wm.append(
+            directory=os.path.join(self.fog_path, "Collection"),
+            filename="fog"
+        )
+
+        # addjust the fog
+        fog_material = bpy.data.materials["fog"]
+        # randomize the colorRamp
+        fog_material.node_tree.nodes["ColorRamp"].color_ramp.elements[0].position = np.random.uniform(0.45, 0.55)
+        fog_material.node_tree.nodes["ColorRamp"].color_ramp.elements[1].position = np.random.uniform(0.6, 1.0)
+
+        # randomize the noise texture
+        fog_material.node_tree.nodes["Noise Texture"].inputs[3].default_value = np.random.uniform(500, 4000)
+        fog_material.node_tree.nodes["Noise Texture"].inputs[4].default_value = np.random.uniform(0.25, 1.0)
+
+        # add keyframes of the noise texture
+        mapping = fog_material.node_tree.nodes["Mapping"]
+        for i in range(0, bpy.context.scene.frame_end // 200):
+            bpy.context.scene.frame_set(i * 200)
+            mapping.inputs[1].default_value[0] = np.random.uniform(-3, 3)
+            mapping.inputs[1].default_value[1] = np.random.uniform(-3, 3)
+            mapping.inputs[1].default_value[2] = np.random.uniform(-3, 3)
+            mapping.inputs[2].default_value[0] = np.random.uniform(-np.pi, np.pi)
+            mapping.inputs[2].default_value[1] = np.random.uniform(-np.pi, np.pi)
+            mapping.inputs[2].default_value[2] = np.random.uniform(-np.pi, np.pi)
+
+            # add keyframes of the mapping
+            mapping.inputs[1].keyframe_insert(data_path="default_value", frame=i * 200)
+            mapping.inputs[2].keyframe_insert(data_path="default_value", frame=i * 200)
+
+
+        print("Loading fog done")
 
     def setup_scene(self):
         bpy.ops.object.camera_add()
@@ -195,6 +255,54 @@ class Blender_render():
         direction = point - cam_loc
         rot_quat = direction.to_track_quat('-Z', 'Y')
         self.camera.rotation_euler = rot_quat.to_euler()
+
+    def randomize_scene(self):
+        '''
+            Randomize the scene: textures of floors, walls, ceilings, and strength of light
+        '''
+        print("Randomizing scene ...")
+        # randomize light strength
+        for light in bpy.data.lights:
+            light.energy *= np.random.uniform(0.7, 1.3)
+
+        # append materials
+        bpy.ops.wm.append(
+            directory=os.path.join(self.material_path, "Object"),
+            filename="Material"
+        )
+
+        # randomize floor material
+        if "Floor" in bpy.data.collections:
+            floor_collection = bpy.data.collections["Floor"]
+            floor_materials = [m for m in bpy.data.materials if "floor" in m.name or "Floor" in m.name]
+            for obj in floor_collection.objects:
+                if len(obj.data.materials) == 0:
+                    # create a new material
+                    obj.data.materials.append(np.random.choice(floor_materials))
+                else:
+                    obj.data.materials[0] = np.random.choice(floor_materials)
+
+        # randomize wall material
+        if "Wall" in bpy.data.collections:
+            wall_collection = bpy.data.collections["Wall"]
+            wall_materials = [m for m in bpy.data.materials if "wall" in m.name or "Wall" in m.name]
+            # randomize each 2 walls with the same material
+            for i in range(0, len(wall_collection.objects), 2):
+                wall_material = np.random.choice(wall_materials)
+                for j in range(2):
+                    if i+j < len(wall_collection.objects):
+                        wall_collection.objects[i+j].data.materials.append(wall_material)
+                        wall_collection.objects[i+j].data.materials[0] = wall_material
+
+        # randomize ceiling material
+        if "Ceiling" in bpy.data.collections:
+            ceiling_collection = bpy.data.collections["Ceiling"]
+            ceiling_materials = [m for m in bpy.data.materials if "ceiling" in m.name or "Ceiling" in m.name]
+            for obj in ceiling_collection.objects:
+                obj.data.materials.append(np.random.choice(ceiling_materials))
+                obj.data.materials[0] = np.random.choice(ceiling_materials)
+
+        print("Scene randomized")
 
     def activate_render_passes(self,
             normal: bool = True,
@@ -272,6 +380,29 @@ class Blender_render():
                                  mirror=False, use_proportional_edit=False, proportional_edit_falloff='SMOOTH',
                                  proportional_size=1, use_proportional_connected=False,
                                  use_proportional_projected=False)
+
+        if self.add_smoke:
+            # add a cube
+            bpy.ops.mesh.primitive_cube_add(size=2, enter_editmode=False, align='WORLD', location=(np.random.uniform(-1.5, 1.5) * self.scale_factor, np.random.uniform(-1.5, 1.5) * self.scale_factor, 1),
+                                            scale=(self.scale_factor / 5, self.scale_factor / 5, self.scale_factor / 5))
+            # change the name of the cube
+            bpy.context.object.name = 'Smoke_cube'
+            # make it not rendered
+            bpy.context.object.hide_render = True
+            # add smoke
+            bpy.ops.object.quick_smoke()
+            # scale the smoke
+            bpy.context.object.scale = (self.scale_factor / 2, self.scale_factor / 2, self.scale_factor * 3)
+            # move z axis
+            z_min = bpy.context.object.bound_box[0][2]
+            bpy.context.object.location[2] -= -z_min * self.scale_factor / 5
+            # change the resulution of the smoke
+            bpy.context.object.modifiers['Fluid'].domain_settings.resolution_max = 128
+
+            # enable the adptive domain
+            bpy.context.object.modifiers['Fluid'].domain_settings.use_adaptive_domain = True
+            bpy.context.object.modifiers['Fluid'].domain_settings.cache_frame_start = 1
+            bpy.context.object.modifiers['Fluid'].domain_settings.cache_frame_end = bpy.context.scene.frame_end
 
         # add objects
         GSO_assets = os.listdir(self.GSO_path)
@@ -517,13 +648,16 @@ class Blender_render():
 
     def retarget_smplx2skeleton(self, mapping):
         # get source motion
-        motion_dataset = np.random.choice(self.motion_datasets)
-        # find all the npz file in the folder recursively
-        motion_files = glob.glob(os.path.join(self.motion_path, motion_dataset, '**/*.npz'), recursive=True)
-        motion_files = [f for f in motion_files]
-        print(f"Number of motion before filter: {len(motion_files)}")
-        # filter out too small motion
-        motion_files = [f for f in motion_files if os.path.getsize(f) > 5e6]
+        for _ in range(100):
+            motion_dataset = np.random.choice(self.motion_datasets)
+            # find all the npz file in the folder recursively
+            motion_files = glob.glob(os.path.join(self.motion_path, motion_dataset, '**/*.npz'), recursive=True)
+            motion_files = [f for f in motion_files]
+            print(f"Number of motion before filter: {len(motion_files)}")
+            # filter out too small motion
+            motion_files = [f for f in motion_files if os.path.getsize(f) > 5e6]
+            if len(motion_files) > 0:
+                break
         print(f"Number of motion files: {len(motion_files)} in {self.motion_path}{motion_dataset}")
         motion = np.random.choice(motion_files)
         print(f"loading motion {motion}")
@@ -779,8 +913,7 @@ class Blender_render():
             if frame_nr % self.force_interval == 1 and self.add_force:
                 # add keyframe to force strength
                 bpy.context.scene.frame_set(frame_nr)
-                force_loc_list = np.random.uniform(np.array([-4, -4, -5]), np.array([4, 4, -3]),
-                                                   size=(self.num_assets * 50, 3)) * self.scale_factor
+                force_loc_list = np.random.uniform(np.array([-4, -4, -5]), np.array([4, 4, -3]), size=(self.num_assets * 50, 3)) * self.scale_factor
                 force_loc_list = self.farthest_point_sampling(force_loc_list, self.force_num)
                 print('force_loc_list', force_loc_list)
                 for i in range(len(self.gso_force)):
@@ -1004,6 +1137,12 @@ if __name__ == "__main__":
     parser.add_argument('--end_frame', type=int, default=None)
     parser.add_argument('--fps', type=int, default=None)
     parser.add_argument('--samples_per_pixel', type=int, default=128)
+    parser.add_argument('--randomize', action='store_true', default=False)
+    parser.add_argument('--add_fog', action='store_true', default=False)
+    parser.add_argument('--fog_path', type=str, default=None)
+    parser.add_argument('--add_smoke', action='store_true', default=False)
+    parser.add_argument('--material_path', type=str, default=None)
+    parser.add_argument('--force_scale', type=float, default=1.0)
     args = parser.parse_args(argv)
     print("args:{0}".format(args))
     ## Load the world
@@ -1034,6 +1173,12 @@ if __name__ == "__main__":
         views=args.views,
         end_frame=args.end_frame,
         fps=args.fps,
+        randomize=args.randomize,
+        add_fog=args.add_fog,
+        fog_path=args.fog_path,
+        add_smoke=args.add_smoke,
+        material_path=args.material_path,
+        force_scale=args.force_scale
     )
 
     renderer.render()
