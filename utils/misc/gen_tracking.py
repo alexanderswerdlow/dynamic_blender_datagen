@@ -98,7 +98,7 @@ def tracking(cp_root: str, data_root: str, tracking_index_list: list, pallette: 
     tracking_points[:, 1] *= 0
     tracking_points *= scale
 
-    for i in tqdm(range(0, len(frames) - 1)) if frame_num is None else tqdm(range(0, frame_num)):
+    for i in tqdm(range(1, len(frames) - 1)) if frame_num is None else tqdm(range(0, frame_num)):
         tracking_results.append([])
         tracking_results_3d.append([])
         K = np.loadtxt(os.path.join(cam_root, 'K_{}.txt'.format(str(i + 1).zfill(4))))

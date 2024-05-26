@@ -29,6 +29,8 @@ class RenderArgs():
     material_path: Path = DATA_DIR / 'blender_assets' / 'materials.blend'
     fps: Optional[int] = None
     remove_temporary_files: bool = True
+    scene_scale: float = 1.0
+    force_scale: float = 1.0
 
     # exr settings
     exr: bool = False
@@ -58,7 +60,6 @@ class RenderArgs():
     add_force: bool = False
     force_step: int = 3
     force_interval: int = 120
-    force_scale: float = 1.0
     camera_root: Path = DATA_DIR / 'camera_trajectory' / 'MannequinChallenge'
     num_assets: int = 5
 
@@ -72,7 +73,7 @@ def render(args: RenderArgs):
     current_path = Path(os.path.dirname(os.path.realpath(__file__)))
     print(f"Render args: {args}")
     print(f"Current path: {current_path}")
-    print(f"Running command: {args.type}")
+    print(f"Rendering type: {args.type}")
     
     blender_path = f'singularity run --bind {os.getcwd()}/singularity/config:/.config --nv singularity/blender.sif' if args.use_singularity else 'blender'
     if args.type is None:
@@ -130,6 +131,7 @@ def render(args: RenderArgs):
                     f"--end_frame {args.end_frame} "
                     f"--fps {args.fps} "
                     f"--samples_per_pixel {args.samples_per_pixel} "
+                    f"--scene_scale {args.scene_scale} --force_scale {args.force_scale} "
                 )
                 if args.use_gpu:
                     rendering_script += ' --use_gpu'
@@ -153,13 +155,14 @@ def render(args: RenderArgs):
         -- --scene_root {args.output_dir / 'scene.blend'} --output_dir {args.output_dir}"
         run_command(obj_script)
 
-    python_path = f'singularity exec --bind {os.getcwd()}/singularity/config:/.config --nv singularity/blender.sif ' if args.use_singularity else ''
+    python_path = f"singularity exec --bind {os.getcwd()}/singularity/config:/.config --nv singularity/blender.sif /bin/bash -c '$BLENDERPY'" if args.use_singularity else "python"
+    postfix = "'" if args.use_singularity else ""
     if args.exr:
-        exr_script = f"{python_path}/bin/bash -c '$BLENDERPY {str(current_path / 'utils' / 'openexr_utils.py')} --data_dir {args.output_dir} --output_dir {args.output_dir}/exr_img --batch_size {args.batch_size} --frame_idx {args.frame_idx}'"
+        exr_script = f"{python_path} {str(current_path / 'utils' / 'openexr_utils.py')} --data_dir {args.output_dir} --output_dir {args.output_dir}/exr_img --batch_size {args.batch_size} --frame_idx {args.frame_idx}" + postfix
         run_command(exr_script)
 
     if args.export_tracking:
-        tracking_script = f"{python_path}/bin/bash -c '$BLENDERPY {str(current_path / 'export_tracks.py')} --data_root {args.output_dir} --cp_root {args.output_dir} {'--outdoor' if args.type == 'human' else ''}'"
+        tracking_script = f"{python_path} {str(current_path / 'export_tracks.py')} --data_root {args.output_dir} --cp_root {args.output_dir}" + postfix
         run_command(tracking_script)
 
     if args.remove_temporary_files:

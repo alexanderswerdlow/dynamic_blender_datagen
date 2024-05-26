@@ -82,7 +82,7 @@ def random_choice(objects, weights):
     probabilities = [w / total_weight for w in weights]
     return random.choices(objects, probabilities)[0]
 
-def train(data_path, slurm_task_index, mode=None, local=False, existing_output_dir: Optional[Path] = None):
+def train(data_path, slurm_task_index, mode=None, local=False, existing_output_dir: Optional[Path] = None, fast: bool = False):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     try:
         job_id = os.getenv('SLURM_JOB_ID')
@@ -117,6 +117,7 @@ def train(data_path, slurm_task_index, mode=None, local=False, existing_output_d
         samples_per_pixel=4,
         fps=32,
         end_frame=512,
+        background_hdr_path = DATA_DIR / 'hdri' / 'outdoor'
     )
 
     if local is False:
@@ -126,8 +127,6 @@ def train(data_path, slurm_task_index, mode=None, local=False, existing_output_d
         args.add_fog = True
         args.randomize = True
         args.add_force = True
-    elif mode == 'robot':
-        args.scene_dir = DATA_DIR / "demo_scene" / "robot.blend"
     elif mode == 'outdoor':
         args.type = "human"
         args.add_smoke = False
@@ -139,12 +138,24 @@ def train(data_path, slurm_task_index, mode=None, local=False, existing_output_d
             [0.3, 0.5, 0.2, 0.05, 0.05]
         )
         args.force_step = random_choice([1, 2, 3, 4, 5], [0.6, 0.3, 0.2, 0.05, 0.05])
-        args.force_scale = random_choice([0.05, 0.1, 0.25, 0.4, 0.6, 1.0], [0.6, 0.4, 0.2, 0.05, 0.05, 0.05])
+        args.force_scale = random_choice([0.05, 0.1, 0.25, 0.4, 0.6, 1.0], [0.1, 0.2, 0.3, 0.4, 0.05, 0.05])
         args.randomize = True
-        args.scene_root = DATA_DIR / "blender_assets" / random_choice(["hdri.blend", "hdri_plane.blend"], [0.5, 0.5])
+        args.scene_root = DATA_DIR / random_choice(["blender_assets/hdri_plane.blend", "demo_scene/robot.blend"], [1.0, 0.01])
     elif mode == 'animal':
         args.type = "animal"
         args.material_path = DATA_DIR / "blender_assets" / "animal_material.blend"
+
+    if fast:
+        args.samples_per_pixel = 1
+        args.fps = 1
+        args.end_frame = 8
+        args.num_assets = 8
+        args.add_force = True
+        args.force_step = 1
+        args.force_interval = 2
+        args.force_scale = 0.5
+        args.scene_scale = 1
+        args.remove_temporary_files = False
 
     if existing_output_dir is not None:
         output_dir = existing_output_dir
@@ -235,6 +246,7 @@ def main(
     partition: str = 'all',
     existing_output_dir: Optional[Path] = None,
     local: bool = False,
+    fast: bool = False,
 ):
     if use_slurm:
         run_slurm(data_path, num_to_process, num_workers, partition)
@@ -243,7 +255,7 @@ def main(
         train(data_path, slurm_task_index)
     else:
         with breakpoint_on_error():
-            train(data_path=data_path, slurm_task_index=0, mode='outdoor', local=local, existing_output_dir=existing_output_dir)
+            train(data_path=data_path, slurm_task_index=0, mode='outdoor', local=local, existing_output_dir=existing_output_dir, fast=fast)
     
 if __name__ == '__main__':
     app()

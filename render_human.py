@@ -43,6 +43,7 @@ class Blender_render():
         add_force: bool = False,
         force_step: int = 3,
         force_num: int = 3,
+        force_scale: float = 1.0,
         force_interval: int = 200,
         views: int = 1,
         end_frame: int = None,
@@ -52,14 +53,23 @@ class Blender_render():
         fog_path: Optional[str] = None,
         add_smoke: bool = False,
         material_path: Optional[str] = None,
-        force_scale: Optional[float] = 1.0
+        scene_scale: Optional[float] = 1.0
     ):
+        
+        hdr_list = os.listdir(background_hdr_path)
+        hdr_list = [str(path) for path in Path(background_hdr_path).rglob('*') if path.suffix in ['.hdr', '.exr']]
+        self.background_hdr_path = np.random.choice(hdr_list)
+        
+        if any(s in Path(self.background_hdr_path).parent.name for s in ('indoor', 'demo_scene')):
+            use_indoor_cam = True
+
         self.blender_scene = bpy.context.scene
         self.render_engine = render_engine
         self.use_gpu = use_gpu
-        self.scale_factor = (10 if not use_indoor_cam else 1) * force_scale
+        self.scale_factor = (10 if not use_indoor_cam else 1) * scene_scale
         self.force_step = force_step
         self.force_num = force_num
+        self.force_scale = force_scale
         self.force_interval = force_interval
         self.add_force = add_force
         self.views = views
@@ -74,10 +84,8 @@ class Blender_render():
         self.num_assets = num_assets
 
         self.set_render_engine()
-        hdr_list = os.listdir(background_hdr_path)
-        hdr_list = [os.path.join(background_hdr_path, x) for x in hdr_list if '.hdr' in x or '.exr' in x]
+        
         self.scratch_dir = scratch_dir
-        self.background_hdr_path = np.random.choice(hdr_list)
         self.GSO_path = GSO_path
         self.partnet_path = partnet_path
         self.character_path = character_path
@@ -96,7 +104,7 @@ class Blender_render():
         print("Loading scene from '%s'" % custom_scene)
         
         if custom_scene.is_dir():
-            blend_files = glob.glob(custom_scene / '**/*.blend', recursive=True)
+            blend_files = glob.glob(str(custom_scene / '**/*.blend'), recursive=True)
             assert len(blend_files) > 0, "No .blend files found in the specified directory"
             custom_scene = np.random.choice(blend_files)
             print("Randomly selected scene file: '%s'" % custom_scene)
@@ -224,7 +232,7 @@ class Blender_render():
         # setup render sampling
         bpy.context.scene.cycles.samples = 64
         # setup framerate
-        bpy.context.scene.render.fps = 30
+        bpy.context.scene.render.fps = self.fps
 
         # scale boundingbox object
         if 'Cube' in bpy.data.objects.keys():
@@ -889,7 +897,6 @@ class Blender_render():
         print(f"Default start/end range: {range(bpy.context.scene.frame_start, bpy.context.scene.frame_end + 1)}, Default FPS: {bpy.context.scene.render.fps}")
         
         bpy.context.scene.frame_end = self.end_frame
-        bpy.context.scene.render.fps = self.fps
 
         print(f"New start/end range: {range(bpy.context.scene.frame_start, bpy.context.scene.frame_end + 1)}, New FPS: {bpy.context.scene.render.fps}", flush=True)
 
@@ -919,7 +926,7 @@ class Blender_render():
                 for i in range(len(self.gso_force)):
                     force_source = self.gso_force[i]
                     # select obj
-                    force_source.field.strength = np.random.uniform(500, 1000) * self.scale_factor
+                    force_source.field.strength = np.random.uniform(500, 1000) * self.force_scale
                     force_source.field.distance_max = 1000
                     force_loc_list[i][2] *= 5
                     force_source.location = force_loc_list[i]
@@ -1142,6 +1149,7 @@ if __name__ == "__main__":
     parser.add_argument('--fog_path', type=str, default=None)
     parser.add_argument('--add_smoke', action='store_true', default=False)
     parser.add_argument('--material_path', type=str, default=None)
+    parser.add_argument('--scene_scale', type=float, default=1.0)
     parser.add_argument('--force_scale', type=float, default=1.0)
     args = parser.parse_args(argv)
     print("args:{0}".format(args))
@@ -1178,6 +1186,7 @@ if __name__ == "__main__":
         fog_path=args.fog_path,
         add_smoke=args.add_smoke,
         material_path=args.material_path,
+        scene_scale=args.scene_scale,
         force_scale=args.force_scale
     )
 
