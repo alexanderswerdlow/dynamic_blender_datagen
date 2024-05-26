@@ -117,7 +117,7 @@ def train(data_path, slurm_task_index, mode=None, local=False, existing_output_d
         samples_per_pixel=4,
         fps=32,
         end_frame=512,
-        background_hdr_path = DATA_DIR / 'hdri' / 'outdoor'
+        background_hdr_path = DATA_DIR / 'hdri'
     )
 
     if local is False:
@@ -138,9 +138,11 @@ def train(data_path, slurm_task_index, mode=None, local=False, existing_output_d
             [0.3, 0.5, 0.2, 0.05, 0.05]
         )
         args.force_step = random_choice([1, 2, 3, 4, 5], [0.6, 0.3, 0.2, 0.05, 0.05])
-        args.force_scale = random_choice([0.05, 0.1, 0.25, 0.4, 0.6, 1.0], [0.1, 0.2, 0.3, 0.4, 0.05, 0.05])
+        args.force_scale = random_choice([0.05, 0.1, 0.25, 0.4, 0.6, 1.0], [0.1, 0.2, 0.3, 0.4, 0.4, 0.3])
         args.randomize = True
         args.scene_root = DATA_DIR / random_choice(["blender_assets/hdri_plane.blend", "demo_scene/robot.blend"], [1.0, 0.01])
+        args.end_frame = random_choice([32, 64, 128, 256, 512], [0.2, 0.2, 0.2, 0.2, 0.2])
+        args.fps = random_choice([2, 5, 10, 15, 30], [0.1, 0.2, 0.2, 0.2, 0.1])
     elif mode == 'animal':
         args.type = "animal"
         args.material_path = DATA_DIR / "blender_assets" / "animal_material.blend"
@@ -185,6 +187,8 @@ def train(data_path, slurm_task_index, mode=None, local=False, existing_output_d
 def tail_log_file(log_file_path, glob_str):
     max_retries = 60
     retry_interval = 2
+
+    print(f"Command: tail -f -n +1 {log_file_path}/{glob_str}")
 
     for _ in range(max_retries):
         try:
