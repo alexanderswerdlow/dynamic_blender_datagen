@@ -166,14 +166,7 @@ def render(args: RenderArgs):
         run_command(tracking_script)
 
     if args.remove_temporary_files:
-        exr_img_path = args.output_dir / 'exr_img'
         exr_path = args.output_dir / 'exr'
-
-        if exr_img_path.exists():
-            shutil.rmtree(exr_img_path)
-        else:
-            raise ValueError(f"exr_img_path {exr_img_path} does not exist")
-        
         if exr_path.exists():
             shutil.rmtree(exr_path)
         else:
