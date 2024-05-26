@@ -16,3 +16,4 @@ einops==0.7.0
 scipy==1.13.1
 opencv_python==4.9.0.80
 lz4==4.3.3
+ipdb==0.13.13

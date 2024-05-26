@@ -187,7 +187,7 @@ def run_slurm(data_path, num_chunks, num_workers, partition, exclude: bool = Fal
         partition=partition,
         **kwargs
     )
-    job_id = slurm.sbatch(f"python slurm.py {data_path} --is_slurm_task --slurm_task_index=$SLURM_ARRAY_TASK_ID")
+    job_id = slurm.sbatch(f"python slurm.py --data_path={data_path} --is_slurm_task --slurm_task_index=$SLURM_ARRAY_TASK_ID")
     print(f"Submitted job {job_id} with {num_chunks} tasks and {num_workers} workers...")
     tail_log_file(Path(f"outputs"), f"{job_id}*")
 

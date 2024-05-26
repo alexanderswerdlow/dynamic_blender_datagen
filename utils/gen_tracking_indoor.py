@@ -359,9 +359,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--data_root', type=Path, default='/Users/yangzheng/code/project/long-term-tracking/data/scenes/render0')
     parser.add_argument('--cp_root', type=Path, default='/Users/yangzheng/code/project/long-term-tracking/data/scenes/render0')
-    parser.add_argument('--outdoor', type=bool, default=False)
+    parser.add_argument('--outdoor', action='store_true')
     args = parser.parse_args()
 
-    with breakpoint_on_error():
-        tracking(args.cp_root, args.data_root, args.outdoor)
+    # with breakpoint_on_error():
+    tracking(args.cp_root, args.data_root, args.outdoor)
 

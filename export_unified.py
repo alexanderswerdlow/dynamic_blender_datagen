@@ -143,12 +143,13 @@ def render(args: RenderArgs):
         -- --scene_root {args.output_dir / 'scene.blend'} --output_dir {args.output_dir}"
         run_command(obj_script)
 
+    python_path = f'singularity exec --bind {os.getcwd()}/singularity/config:/.config --nv singularity/blender_binary.sig ' if args.use_singularity else ''
     if args.exr:
-        exr_script = f'python -m utils.openexr_utils --data_dir {args.output_dir} --output_dir {args.output_dir}/exr_img --batch_size {args.batch_size} --frame_idx {args.frame_idx}'
+        exr_script = f"{python_path}/bin/bash -c '$BLENDERPY {str(current_path / 'utils' / 'openexr_utils.py')} --data_dir {args.output_dir} --output_dir {args.output_dir}/exr_img --batch_size {args.batch_size} --frame_idx {args.frame_idx}'"
         run_command(exr_script)
 
     if args.export_tracking:
-        tracking_script = f'python -m utils.gen_tracking_indoor --data_root {args.output_dir} --cp_root {args.output_dir} --outdoor {args.type == "human"}'
+        tracking_script = f"{python_path}/bin/bash -c '$BLENDERPY {str(current_path / 'utils' / 'gen_tracking_indoor.py')} --data_root {args.output_dir} --cp_root {args.output_dir} {'--outdoor' if args.type == 'human' else ''}'"
         run_command(tracking_script)
 
 
