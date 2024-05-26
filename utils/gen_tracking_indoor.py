@@ -329,7 +329,7 @@ def tracking(cp_root: Path, data_root: Path, outdoor=False):
                 else:
                     tracked_points[reference_frame_idx][asset_name] = [points_on_mesh]
 
-    max_num_pts = max(i[0].shape[0] for i in points_to_track[next(iter(points_to_track.keys()))].values())
+    max_num_pts = max([i[0].shape[0] for idx in points_to_track.keys() for i in points_to_track[idx].values()])
     window_size = len(points_to_track)
     num_objects = len(points_to_track[0].keys())
     pixel_aligned_tracks = np.full((len(points_to_track), window_size, num_objects, max_num_pts, 3), dtype=np.float16, fill_value=np.nan)

@@ -177,3 +177,5 @@ debug
 data
 build_assets/
 blender.def
+singularity/config
+singularity/overlay.img

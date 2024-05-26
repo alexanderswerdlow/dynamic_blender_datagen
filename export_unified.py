@@ -74,7 +74,7 @@ def render(args: RenderArgs):
     singularity_cmd = 'singularity'
 
     pwd = os.getcwd()
-    blender_path = f'{singularity_cmd} run --nv singularity/blender_binary.sig' if args.use_singularity else 'blender'
+    blender_path = f'{singularity_cmd} run --bind $(pwd)/singularity/config:/.config --nv singularity/blender_binary.sig' if args.use_singularity else 'blender'
     if args.type is None:
         if args.rendering:
             rendering_script = (

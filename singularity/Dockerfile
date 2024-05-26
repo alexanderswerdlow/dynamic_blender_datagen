@@ -59,7 +59,7 @@ RUN rm -rf ${BLENDER_PATH}/python/lib/python3.10/site-packages/numpy
 RUN ${BLENDERPY} -m ensurepip && ${BLENDERPIP} install --upgrade pip && ${BLENDERPIP} install numpy
 
 # ENV GLOBAL_SCRIPTS_PATH "/usr/share/blender/3.3/scripts"
-ENV GLOBAL_SCRIPTS_PATH "$HOME/.config/blender/3.3/scripts"
+ENV GLOBAL_SCRIPTS_PATH "/.config/blender/3.3/scripts"
 RUN mkdir -p $GLOBAL_SCRIPTS_PATH
 RUN mv /build_assets/addons $GLOBAL_SCRIPTS_PATH/
 
@@ -78,4 +78,4 @@ ENV PYTHONPATH "$PYTHONPATH:$GLOBAL_SCRIPTS_PATH/addons:$GLOBAL_SCRIPTS_PATH/add
 COPY requirements.txt /
 RUN ${BLENDERPIP} install -r /requirements.txt
 RUN ${BLENDERPIP} install git+https://github.com/alexanderswerdlow/image_utils.git@511d72c841dc732dd529c3627b0fab0466e622c6 --no-deps
-
+RUN mv .config .default_config

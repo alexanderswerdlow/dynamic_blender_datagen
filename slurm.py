@@ -212,8 +212,8 @@ def main(
         train(data_path, slurm_task_index)
     else:
         with breakpoint_on_error():
-            train(data_path, 0, mode='outdoor', local=True)
-            # , existing_output_dir=Path('/home/aswerdlow/Documents/research/github/point_odyssey/results/outdoor/11')
+            train(data_path, 0, mode='outdoor', local=False, existing_output_dir=Path('/home/aswerdlow/Documents/research/github/point_odyssey/results/outdoor/1'))
+            # , 
     
 if __name__ == '__main__':
     app()
