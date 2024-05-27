@@ -37,16 +37,17 @@ def read_obj_file(obj_path: str):
 
     return np.asarray(vertices), np.asarray(faces)
 
+
 def unproject(depth, K, RT):
     H, W = depth.shape
     y, x = np.indices((H, W))
     ones = np.ones((H, W))
-    pixel_positions = np.stack((x, y, ones), axis=-1)    
+    pixel_positions = np.stack((x, y, ones), axis=-1)
     K_inv = np.linalg.inv(K)
-    camera_coords = pixel_positions @ K_inv.T    
+    camera_coords = pixel_positions @ K_inv.T
     camera_coords *= depth[..., None]
     camera_coords_hom = np.concatenate([camera_coords, ones[..., None]], axis=-1)
-    
+
     R = RT[:3, :3]
     T = RT[:3, 3]
     RT_inv = np.eye(4)
@@ -54,8 +55,9 @@ def unproject(depth, K, RT):
     RT_inv[:3, 3] = -R.T @ T  # Correct translation component
 
     points = camera_coords_hom @ RT_inv.T
-    
+
     return points[..., :3]
+
 
 def reprojection(points: np.ndarray, K: np.ndarray, RT: np.ndarray):
     v = np.concatenate((points, np.ones((points.shape[0], 1))), axis=1)
@@ -377,18 +379,29 @@ def tracking(cp_root: Path, data_root: Path, viz=False):
 
     K_data = np.stack(K_data, axis=0)
     RT_data = np.stack(RT_data, axis=0)
-    
+
     max_num_pts = max([i[0].shape[0] for idx in points_to_track.keys() for i in points_to_track[idx].values()])
     window_size = len(points_to_track)
     num_objects = len(points_to_track[next(iter(points_to_track.keys()))].keys())
     pixel_aligned_tracks = np.full((len(points_to_track), window_size, num_objects, max_num_pts, 3), dtype=np.float16, fill_value=np.nan)
+
+    points_outside_image = np.full((len(points_to_track), window_size, num_objects), dtype=np.int32, fill_value=0)
     for reference_frame_idx, reference_frame in enumerate(points_to_track.keys()):
         if viz:
             rr.set_time_sequence("frame", reference_frame_idx)
         cur_depth = repeat(depth_data[reference_frame], "h w () -> b h w ()", b=len(points_to_track))
-        cur_xyz = repeat(unproject(depth_data[reference_frame].squeeze(-1), K_data[reference_frame_idx].astype(np.float32), RT_data[reference_frame_idx].astype(np.float32)), 'h w c -> b h w c', b=window_size)
+        cur_xyz = repeat(
+            unproject(
+                depth_data[reference_frame].squeeze(-1),
+                K_data[reference_frame_idx].astype(np.float32),
+                RT_data[reference_frame_idx].astype(np.float32),
+            ),
+            "h w c -> b h w c",
+            b=window_size,
+        )
 
-        rr.log(f"world/depth_unproj", rr.Points3D(cur_xyz[0].reshape(-1, 3)))
+        if viz:
+            rr.log(f"world/depth_unproj", rr.Points3D(cur_xyz[0].reshape(-1, 3)))
         for asset_idx, asset_name in enumerate(points_to_track[reference_frame].keys()):
             _, _, _, coords = points_to_track[reference_frame][asset_name]
 
@@ -409,14 +422,14 @@ def tracking(cp_root: Path, data_root: Path, viz=False):
             cur_depth[:, coords[:, 1], coords[:, 0]] = z
 
             within_bounds = (uv[..., 0] >= 0) & (uv[..., 0] < w) & (uv[..., 1] >= 0) & (uv[..., 1] < h)
-            num_outside = (~within_bounds).sum()
-
-            print(f"Number of points outside the image bounds: {num_outside}")
+            
+            for i in range(bs):
+                points_outside_image[reference_frame_idx, i, asset_idx] = (~within_bounds[i]).sum()
 
         if viz:
             for i in range(cur_depth.shape[0]):
                 rr.log(f"world/diff_pcd_{i}", rr.Points3D(cur_xyz[i].reshape(-1, 3)))
-        
+
         cur_xyz = cur_xyz.astype(np.float16)
         for i in range(cur_depth.shape[0]):
             np.savez(save_dynamic_depths_root / f"depth_{idx_to_str_5(reference_frame_idx)}_{idx_to_str_5(i)}.npz", xyz=cur_xyz[i])
@@ -425,7 +438,17 @@ def tracking(cp_root: Path, data_root: Path, viz=False):
     RT_data = RT_data.astype(np.float16)
 
     # save annotations as npz
-    np.savez_compressed(os.path.join(data_root, "annotations.npz"), intrinsics=K_data, extrinsics=RT_data, pixel_aligned_tracks=pixel_aligned_tracks)
+    np.savez(
+        os.path.join(data_root, "annotations.npz"),
+        intrinsics=K_data,
+        extrinsics=RT_data,
+        points_outside_image=points_outside_image,
+    )
+
+    np.savez_compressed(
+        os.path.join(data_root, "pixel_aligned_tracks.npz"),
+        pixel_aligned_tracks=pixel_aligned_tracks,
+    )
 
     return pixel_aligned_tracks
 
@@ -441,5 +464,3 @@ if __name__ == "__main__":
 
     with breakpoint_on_error():
         tracking(args.cp_root, args.data_root, args.viz)
-
-    breakpoint()

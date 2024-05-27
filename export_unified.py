@@ -155,7 +155,7 @@ def render(args: RenderArgs):
         -- --scene_root {args.output_dir / 'scene.blend'} --output_dir {args.output_dir}"
         run_command(obj_script)
 
-    python_path = f"singularity exec --bind {os.getcwd()}/singularity/config:/.config --nv singularity/blender.sif /bin/bash -c '$BLENDERPY'" if args.use_singularity else "python"
+    python_path = f"singularity exec --bind {os.getcwd()}/singularity/config:/.config --nv singularity/blender.sif /bin/bash -c '$BLENDERPY" if args.use_singularity else "python"
     postfix = "'" if args.use_singularity else ""
     if args.exr:
         exr_script = f"{python_path} {str(current_path / 'utils' / 'openexr_utils.py')} --data_dir {args.output_dir} --output_dir {args.output_dir}/exr_img --batch_size {args.batch_size} --frame_idx {args.frame_idx}" + postfix

@@ -114,7 +114,7 @@ def train(data_path, slurm_task_index, mode=None, local=False, existing_output_d
         export_obj=existing_output_dir is None,
         export_tracking=True,
         use_gpu=True,
-        samples_per_pixel=4,
+        samples_per_pixel=16,
         fps=32,
         end_frame=512,
         background_hdr_path = DATA_DIR / 'hdri'
@@ -131,7 +131,7 @@ def train(data_path, slurm_task_index, mode=None, local=False, existing_output_d
         args.type = "human"
         args.add_smoke = False
         args.add_fog = False
-        args.num_assets = random_choice([2, 5, 8, 10, 15], [0.2, 0.2, 0.5, 0.5, 0.05])
+        args.num_assets = random_choice([2, 5, 8, 10, 15], [0.1, 0.2, 0.5, 0.2, 0.05])
         args.add_force = random_choice([True, False], [0.5, 0.5])
         args.force_interval = random_choice(
             [args.end_frame // 1, args.end_frame // 2, args.end_frame // 4, args.end_frame // 8, args.end_frame // 16],
@@ -141,12 +141,12 @@ def train(data_path, slurm_task_index, mode=None, local=False, existing_output_d
         args.force_scale = random_choice([0.05, 0.1, 0.25, 0.4, 0.6, 1.0], [0.1, 0.2, 0.3, 0.4, 0.4, 0.3])
         args.randomize = True
         args.scene_root = DATA_DIR / random_choice(["blender_assets/hdri_plane.blend", "demo_scene/robot.blend"], [1.0, 0.01])
-        args.end_frame = random_choice([32, 64, 128, 256, 512], [0.2, 0.2, 0.2, 0.2, 0.2])
+        args.end_frame = random_choice([32, 64, 128, 256, 384], [0.2, 0.2, 0.2, 0.2, 0.2])
         args.fps = random_choice([2, 5, 10, 15, 30], [0.1, 0.2, 0.2, 0.2, 0.1])
     elif mode == 'animal':
         args.type = "animal"
         args.material_path = DATA_DIR / "blender_assets" / "animal_material.blend"
-
+    
     if fast:
         args.samples_per_pixel = 1
         args.fps = 1
@@ -162,8 +162,11 @@ def train(data_path, slurm_task_index, mode=None, local=False, existing_output_d
     if existing_output_dir is not None:
         output_dir = existing_output_dir
     else:
-        while (output_dir := data_path / mode / f"{slurm_task_index}").exists():
-            slurm_task_index += 1
+        output_dir = data_path / mode / f"{slurm_task_index}"
+        if output_dir.exists():
+            idx = 0
+            while (output_dir := data_path / mode / f"{slurm_task_index}_{idx}").exists():
+                idx += 1
 
     output_dir.mkdir(parents=True, exist_ok=True)
     args.output_dir = output_dir
@@ -220,11 +223,11 @@ def run_slurm(data_path, num_chunks, num_workers, partition, exclude: bool = Fal
     slurm = Slurm(
         "--requeue=10",
         job_name='blender',
-        cpus_per_task=3,
+        cpus_per_task=4,
         mem='16g',
         export='ALL',
         gres=['gpu:1'],
-        output=f'outputs/{Slurm.JOB_ARRAY_MASTER_ID}_{Slurm.JOB_ARRAY_ID}.out',
+        output=f'outputs/{Slurm.JOB_ARRAY_MASTER_ID}_{Slurm.JOB_ARRAY_ID}_{Slurm.JOB_ID}.out',
         time=timedelta(days=3, hours=0, minutes=0, seconds=0) if 'kate' in partition else timedelta(days=0, hours=6, minutes=0, seconds=0),
         array=f"0-{num_chunks-1}%{num_workers}",
         partition=partition,

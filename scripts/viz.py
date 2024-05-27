@@ -12,7 +12,7 @@ def find_image_paths(results_path):
                 all_image_lists.append(png_files)
     return all_image_lists
 
-results_path = 'results'
+results_path = 'generated'
 image_paths = sorted(find_image_paths(results_path), key=len, reverse=True)
 for path_list in image_paths:
     Im(np.stack([Im(img_path).np for img_path in sorted(path_list)])).save_video(f'video_{path_list[0].parent.parent.name}.mp4', fps=16)
