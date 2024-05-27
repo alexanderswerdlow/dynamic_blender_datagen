@@ -154,8 +154,8 @@ def train(data_path, slurm_task_index, mode=None, local=False, existing_output_d
         args.num_assets = 8
         args.add_force = True
         args.force_step = 1
-        args.force_interval = 2
-        args.force_scale = 0.5
+        args.force_interval = 4
+        args.force_scale = 1.0
         args.scene_scale = 1
         args.remove_temporary_files = False
 

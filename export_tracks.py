@@ -37,6 +37,25 @@ def read_obj_file(obj_path: str):
 
     return np.asarray(vertices), np.asarray(faces)
 
+def unproject(depth, K, RT):
+    H, W = depth.shape
+    y, x = np.indices((H, W))
+    ones = np.ones((H, W))
+    pixel_positions = np.stack((x, y, ones), axis=-1)    
+    K_inv = np.linalg.inv(K)
+    camera_coords = pixel_positions @ K_inv.T    
+    camera_coords *= depth[..., None]
+    camera_coords_hom = np.concatenate([camera_coords, ones[..., None]], axis=-1)
+    
+    R = RT[:3, :3]
+    T = RT[:3, 3]
+    RT_inv = np.eye(4)
+    RT_inv[:3, :3] = R.T  # Transpose of rotation matrix R
+    RT_inv[:3, 3] = -R.T @ T  # Correct translation component
+
+    points = camera_coords_hom @ RT_inv.T
+    
+    return points[..., :3]
 
 def reprojection(points: np.ndarray, K: np.ndarray, RT: np.ndarray):
     v = np.concatenate((points, np.ones((points.shape[0], 1))), axis=1)
@@ -148,11 +167,13 @@ def tracking(cp_root: Path, data_root: Path, viz=False):
     save_depths_root = data_root / "depths"
     save_masks_root = data_root / "masks"
     save_normals_root = data_root / "normals"
+    save_dynamic_depths_root = data_root / "dynamic_depths"
 
     save_rgbs_root.mkdir(parents=True, exist_ok=True)
     save_depths_root.mkdir(parents=True, exist_ok=True)
     save_masks_root.mkdir(parents=True, exist_ok=True)
     save_normals_root.mkdir(parents=True, exist_ok=True)
+    save_dynamic_depths_root.mkdir(parents=True, exist_ok=True)
 
     frames = sorted(img_root.glob("*.png"))
     num_frames = len(frames)
@@ -190,13 +211,17 @@ def tracking(cp_root: Path, data_root: Path, viz=False):
     loaded_meshes = defaultdict(dict)
     depth_data = dict()
 
-    for reference_frame_idx in tqdm(range(1, num_frames - 1)):
-        K = np.loadtxt(cam_root / f"K_{idx_to_str_4(reference_frame_idx + 1)}.txt")
-        RT = np.loadtxt(cam_root / f"RT_{idx_to_str_4(reference_frame_idx + 1)}.txt")
+    max_depth_value = 1000
+    min_depth_value = 0
+
+    for reference_frame_idx, reference_frame in tqdm(enumerate(range(1, num_frames - 1))):
+        blender_reference_frame = reference_frame + 1
+        K = np.loadtxt(cam_root / f"K_{idx_to_str_4(blender_reference_frame)}.txt")
+        RT = np.loadtxt(cam_root / f"RT_{idx_to_str_4(blender_reference_frame)}.txt")
         RT = R3 @ R2 @ RT @ R1
-        depth = read_tiff(exr_root / f"depth_{idx_to_str_5(reference_frame_idx + 1)}.tiff")
-        mask = cv2.imread(str(exr_root / f"segmentation_{idx_to_str_5(reference_frame_idx + 1)}.png"))
-        img = cv2.imread(str(exr_root / f"rgb_{idx_to_str_5(reference_frame_idx + 1)}.png"))
+        depth = read_tiff(exr_root / f"depth_{idx_to_str_5(blender_reference_frame)}.tiff")
+        mask = cv2.imread(str(exr_root / f"segmentation_{idx_to_str_5(blender_reference_frame)}.png"))
+        img = cv2.imread(str(exr_root / f"rgb_{idx_to_str_5(blender_reference_frame)}.png"))
         h, w, _ = img.shape
 
         # convert img to jpg
@@ -205,24 +230,22 @@ def tracking(cp_root: Path, data_root: Path, viz=False):
 
         # convert depth to 16 bit png
         save_depth_path = save_depths_root / f"depth_{idx_to_str_5(reference_frame_idx)}.png"
-        max_value = 1000
-        min_value = 0
         data = depth.copy()
-        data[data > max_value] = max_value
-        data[data < min_value] = min_value
+        data[data > max_depth_value] = max_depth_value
+        data[data < min_depth_value] = min_depth_value
         depth_data[reference_frame_idx] = data.copy()
-        data = (data - min_value) * 65535 / (max_value - min_value)
+        data = (data - min_depth_value) * 65535 / (max_depth_value - min_depth_value)
         data = data.astype(np.uint16)
         write_png(data, save_depth_path)
 
         # cp normals and masks
         save_normal_path = save_normals_root / f"normal_{idx_to_str_5(reference_frame_idx)}.jpg"
-        save_normal = cv2.imread(str(exr_root / f"normal_{idx_to_str_5(reference_frame_idx + 1)}.png"))
+        save_normal = cv2.imread(str(exr_root / f"normal_{idx_to_str_5(blender_reference_frame)}.png"))
         cv2.imwrite(str(save_normal_path), save_normal)
 
         save_mask_path = save_masks_root / f"mask_{idx_to_str_5(reference_frame_idx)}.png"
-        if (exr_root / f"segmentation_{idx_to_str_5(reference_frame_idx + 1)}.png").exists():
-            shutil.copy(exr_root / f"segmentation_{idx_to_str_5(reference_frame_idx + 1)}.png", save_mask_path)
+        if (exr_root / f"segmentation_{idx_to_str_5(blender_reference_frame)}.png").exists():
+            shutil.copy(exr_root / f"segmentation_{idx_to_str_5(blender_reference_frame)}.png", save_mask_path)
 
         K_data.append(K.astype(np.float16))
         RT_data.append(RT.astype(np.float16))
@@ -254,10 +277,10 @@ def tracking(cp_root: Path, data_root: Path, viz=False):
                 static=True,
             )
 
-        i_coords, j_coords = np.meshgrid(np.arange(h), np.arange(w), indexing="xy")
-        i_flat = i_coords.flatten()
+        j_coords, i_coords = np.meshgrid(np.arange(w), np.arange(h), indexing="xy")
         j_flat = j_coords.flatten()
-        pixel_coords = np.vstack((i_flat, j_flat)).T  # Shape: [h*w, 2]
+        i_flat = i_coords.flatten()
+        pixel_coords = np.vstack((j_flat, i_flat)).T  # Shape: [h*w, 2]
         pixel_coords = pixel_coords.reshape(h, w, 2)
 
         for idx in range(len(assets)):
@@ -265,7 +288,7 @@ def tracking(cp_root: Path, data_root: Path, viz=False):
             asset_name = asset.replace(".", "_")
             if asset_name == "background":
                 continue
-            obj_path = os.path.join(obj_root, "{}_{}.obj".format(asset_name, str(reference_frame_idx + 1).zfill(4)))
+            obj_path = os.path.join(obj_root, "{}_{}.obj".format(asset_name, str(blender_reference_frame).zfill(4)))
             mesh = trimesh.load(str(obj_path))
             asset_mask = np.logical_and(mask[:, :, 2] == pallette[idx + 1, 0], mask[:, :, 1] == pallette[idx + 1, 1])
             asset_mask = np.logical_and(asset_mask, mask[:, :, 0] == pallette[idx + 1, 2])
@@ -337,10 +360,10 @@ def tracking(cp_root: Path, data_root: Path, viz=False):
                     loaded_meshes[target_frame_idx][asset_name].triangles[index_faces], intersection_points_barycentric_coordinates
                 )
                 if viz and abs(reference_frame_idx - target_frame_idx) < 4:
-                    rr.log(f"world/{asset_name}_{idx}_tracked_3d_frame_pos", rr.Points3D(points_on_mesh))
+                    rr.log(f"world/{asset_name}/{idx}_tracked_3d_frame_pos", rr.Points3D(points_on_mesh))
                     if asset_name in tracked_points[reference_frame_idx] and len(tracked_points[reference_frame_idx][asset_name]) != 0:
                         rr.log(
-                            f"world/{asset_name}_{idx}_tracked_3d_delta_frame_diff",
+                            f"world/{asset_name}/{idx}_tracked_3d_delta_frame_diff",
                             rr.Arrows3D(
                                 origins=tracked_points[reference_frame_idx][asset_name][-1],
                                 vectors=points_on_mesh - tracked_points[reference_frame_idx][asset_name][-1],
@@ -360,25 +383,43 @@ def tracking(cp_root: Path, data_root: Path, viz=False):
     num_objects = len(points_to_track[next(iter(points_to_track.keys()))].keys())
     pixel_aligned_tracks = np.full((len(points_to_track), window_size, num_objects, max_num_pts, 3), dtype=np.float16, fill_value=np.nan)
     for reference_frame_idx, reference_frame in enumerate(points_to_track.keys()):
+        if viz:
+            rr.set_time_sequence("frame", reference_frame_idx)
         cur_depth = repeat(depth_data[reference_frame], "h w () -> b h w ()", b=len(points_to_track))
+        cur_xyz = repeat(unproject(depth_data[reference_frame].squeeze(-1), K_data[reference_frame_idx].astype(np.float32), RT_data[reference_frame_idx].astype(np.float32)), 'h w c -> b h w c', b=window_size)
+
+        rr.log(f"world/depth_unproj", rr.Points3D(cur_xyz[0].reshape(-1, 3)))
         for asset_idx, asset_name in enumerate(points_to_track[reference_frame].keys()):
             _, _, _, coords = points_to_track[reference_frame][asset_name]
-            pixel_aligned_tracks[reference_frame_idx, :, asset_idx, : tracked_points[reference_frame][asset_name][0].shape[0], :] = np.stack(
-                tracked_points[reference_frame][asset_name], axis=0
-            )
-            
+
             pts = np.stack(tracked_points[reference_frame][asset_name], axis=0)
+            pixel_aligned_tracks[reference_frame_idx, :, asset_idx, : tracked_points[reference_frame][asset_name][0].shape[0], :] = pts
+
+            if viz:
+                rr.log(f"world/{asset_name}/orig_depth_unproj", rr.Points3D(cur_xyz[0, coords[:, 1], coords[:, 0]]))
+
+            cur_xyz[:, coords[:, 1], coords[:, 0]] = pts
+
             bs = pts.shape[0]
             pts = rearrange(pts, "b n c -> (b n) c")
             uv, z = reprojection(pts, K_data[reference_frame_idx], RT_data[reference_frame_idx])
 
             uv = rearrange(uv, "(b n) c -> b n c", b=bs)
             z = rearrange(z, "(b n) c -> b n c", b=bs)
-            cur_depth[:, coords[:, 0], coords[:, 1]] = z
+            cur_depth[:, coords[:, 1], coords[:, 0]] = z
 
             within_bounds = (uv[..., 0] >= 0) & (uv[..., 0] < w) & (uv[..., 1] >= 0) & (uv[..., 1] < h)
             num_outside = (~within_bounds).sum()
+
             print(f"Number of points outside the image bounds: {num_outside}")
+
+        if viz:
+            for i in range(cur_depth.shape[0]):
+                rr.log(f"world/diff_pcd_{i}", rr.Points3D(cur_xyz[i].reshape(-1, 3)))
+        
+        cur_xyz = cur_xyz.astype(np.float16)
+        for i in range(cur_depth.shape[0]):
+            np.savez(save_dynamic_depths_root / f"depth_{idx_to_str_5(reference_frame_idx)}_{idx_to_str_5(i)}.npz", xyz=cur_xyz[i])
 
     K_data = K_data.astype(np.float16)
     RT_data = RT_data.astype(np.float16)
@@ -400,3 +441,5 @@ if __name__ == "__main__":
 
     with breakpoint_on_error():
         tracking(args.cp_root, args.data_root, args.viz)
+
+    breakpoint()
