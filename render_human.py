@@ -17,10 +17,7 @@ SENSOR_WIDTH = 50
 RESULOUTION_X = 960
 RESULOUTION_Y = 540
 
-# randomize np seed using time
-np.random.seed(int(time.time()))
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-
 
 class Blender_render:
     def __init__(
@@ -237,12 +234,14 @@ class Blender_render:
         bpy.context.scene.render.fps = self.fps
 
         # scale boundingbox object
-        if "Cube" in bpy.data.objects.keys():
-            # bpy.data.objects['Cube'].location *= self.scale_factor
-            # bpy.data.objects['Cube'].scale *= self.scale_factor
+        print(f"Cube in scene: {'Cube' in bpy.data.objects.keys()}")
+        if  "Cube" in bpy.data.objects.keys():
+            bpy.data.objects['Cube'].location *= self.scale_factor
+            bpy.data.objects['Cube'].scale *= self.scale_factor
             # apply scale
             bpy.context.view_layer.objects.active = bpy.data.objects["Cube"]
             bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+            print(f"Scaling Cube in scene by {self.scale_factor}")
 
         # setup area light
         bpy.ops.object.light_add(
@@ -278,7 +277,8 @@ class Blender_render:
             light.energy *= np.random.uniform(0.7, 1.3)
 
         # append materials
-        bpy.ops.wm.append(directory=os.path.join(self.material_path, "Object"), filename="Material")
+        # Right now this only contains a cube which we don't want
+        # bpy.ops.wm.append(directory=os.path.join(self.material_path, "Object"), filename="Material")
 
         # randomize floor material
         if "Floor" in bpy.data.collections:
@@ -376,6 +376,7 @@ class Blender_render:
         # select all objects in the collection
         for obj in character_collection.objects:
             obj.select_set(True)
+
         # add scale
         bpy.ops.transform.resize(
             value=(self.scale_factor * 1.2, self.scale_factor * 1.2, self.scale_factor * 1.2),

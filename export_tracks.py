@@ -53,7 +53,6 @@ def unproject(depth, K, RT):
     RT_inv = np.eye(4)
     RT_inv[:3, :3] = R.T  # Transpose of rotation matrix R
     RT_inv[:3, 3] = -R.T @ T  # Correct translation component
-
     points = camera_coords_hom @ RT_inv.T
 
     return points[..., :3]

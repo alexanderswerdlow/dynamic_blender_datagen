@@ -82,15 +82,19 @@ def random_choice(objects, weights):
     probabilities = [w / total_weight for w in weights]
     return random.choices(objects, probabilities)[0]
 
-def train(data_path, slurm_task_index, mode=None, local=False, existing_output_dir: Optional[Path] = None, fast: bool = False):
+def train(data_path, slurm_task_index, mode=None, local=False, existing_output_dir: Optional[Path] = None, fast: bool = False, end_frame: Optional[int] = None):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     try:
         job_id = os.getenv('SLURM_JOB_ID')
+        job_array_id = os.getenv('SLURM_ARRAY_JOB_ID')
+        job_index = os.getenv('SLURM_ARRAY_TASK_ID')
         addr = None
         info_str = f"{os.getpid()} {socket.gethostname()} {device} {job_id} {addr}"
         print(f"Starting inference on {info_str}")
     except:
-        pass
+        job_id = None
+        job_array_id = None
+        job_index = None
 
     result = subprocess.check_output("nvidia-smi -L", shell=True).decode()
     print(result)
@@ -117,6 +121,7 @@ def train(data_path, slurm_task_index, mode=None, local=False, existing_output_d
         samples_per_pixel=16,
         fps=32,
         end_frame=512,
+        batch_size=32,
         background_hdr_path = DATA_DIR / 'hdri'
     )
 
@@ -135,7 +140,7 @@ def train(data_path, slurm_task_index, mode=None, local=False, existing_output_d
         args.add_force = random_choice([True, False], [0.5, 0.5])
         args.force_interval = random_choice(
             [args.end_frame // 1, args.end_frame // 2, args.end_frame // 4, args.end_frame // 8, args.end_frame // 16],
-            [0.3, 0.5, 0.2, 0.05, 0.05]
+            [0.3, 0.5, 0.5, 0.3, 0.05]
         )
         args.force_step = random_choice([1, 2, 3, 4, 5], [0.6, 0.3, 0.2, 0.05, 0.05])
         args.force_scale = random_choice([0.05, 0.1, 0.25, 0.4, 0.6, 1.0], [0.1, 0.2, 0.3, 0.4, 0.4, 0.3])
@@ -159,6 +164,9 @@ def train(data_path, slurm_task_index, mode=None, local=False, existing_output_d
         args.scene_scale = 1
         args.remove_temporary_files = False
 
+    if end_frame is not None:
+        args.end_frame = end_frame
+
     if existing_output_dir is not None:
         output_dir = existing_output_dir
     else:
@@ -179,13 +187,20 @@ def train(data_path, slurm_task_index, mode=None, local=False, existing_output_d
         ]
         for var in slurm_env_vars:
             f.write(f"{var}={os.getenv(var, 'Not Set')}\n")
-
+        
+        f.write("\n")
         for field in args.__dataclass_fields__:
             f.write(f"{field} = {getattr(args, field)}\n")
+    
+    initial_log_file = Path('outputs') / f"{job_array_id}_{job_index}_{job_id}.out"
+
+    try:
+        os.symlink(initial_log_file.resolve(), output_dir / "log.out")
+    except:
+        print(f"Failed to symlink {initial_log_file} to log.out")
 
     render(args)
     print(f"Finished rendering {output_dir}")
-    
 
 def tail_log_file(log_file_path, glob_str):
     max_retries = 60
@@ -224,7 +239,7 @@ def run_slurm(data_path, num_chunks, num_workers, partition, exclude: bool = Fal
         "--requeue=10",
         job_name='blender',
         cpus_per_task=4,
-        mem='16g',
+        mem='24g',
         export='ALL',
         gres=['gpu:1'],
         output=f'outputs/{Slurm.JOB_ARRAY_MASTER_ID}_{Slurm.JOB_ARRAY_ID}_{Slurm.JOB_ID}.out',
@@ -254,6 +269,7 @@ def main(
     existing_output_dir: Optional[Path] = None,
     local: bool = False,
     fast: bool = False,
+    end_frame: Optional[int] = None
 ):
     if use_slurm:
         run_slurm(data_path, num_to_process, num_workers, partition)
@@ -262,7 +278,7 @@ def main(
         train(data_path, slurm_task_index)
     else:
         with breakpoint_on_error():
-            train(data_path=data_path, slurm_task_index=0, mode='outdoor', local=local, existing_output_dir=existing_output_dir, fast=fast)
+            train(data_path=data_path, slurm_task_index=0, mode='outdoor', local=local, existing_output_dir=existing_output_dir, fast=fast, end_frame=end_frame)
     
 if __name__ == '__main__':
     app()

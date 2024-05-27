@@ -175,6 +175,6 @@ def render(args: RenderArgs):
 
 if __name__ == '__main__':
     RenderTap = to_tap_class(RenderArgs)
-    tap = RenderTap(description=__doc__)  # from the top of this script
+    tap = RenderTap(description=__doc__)
     args = tap.parse_args()
     render(RenderArgs(**args.as_dict()))
