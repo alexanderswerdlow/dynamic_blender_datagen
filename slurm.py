@@ -226,7 +226,7 @@ def tail_log_file(log_file_path, glob_str):
     print(f"File not found: {log_file_path} after {max_retries * retry_interval} seconds...")
 
 
-def run_slurm(data_path, num_chunks, num_workers, partition, exclude: bool = False):
+def run_slurm(data_path, num_chunks, num_workers, partition, exclude: bool = False, end_frame: Optional[int] = None):
     print(f"Running slurm job with {num_chunks} chunks and {num_workers} workers...")
     from simple_slurm import Slurm
 
@@ -248,7 +248,7 @@ def run_slurm(data_path, num_chunks, num_workers, partition, exclude: bool = Fal
         partition=partition,
         **kwargs
     )
-    job_id = slurm.sbatch(f"python slurm.py --data_path={data_path} --is_slurm_task --slurm_task_index=$SLURM_ARRAY_TASK_ID")
+    job_id = slurm.sbatch(f"python slurm.py --data_path={data_path} --is_slurm_task --slurm_task_index=$SLURM_ARRAY_TASK_ID --end_frame={end_frame}")
     print(f"Submitted job {job_id} with {num_chunks} tasks and {num_workers} workers...")
     tail_log_file(Path(f"outputs"), f"{job_id}*")
 
@@ -272,10 +272,10 @@ def main(
     end_frame: Optional[int] = None
 ):
     if use_slurm:
-        run_slurm(data_path, num_to_process, num_workers, partition)
+        run_slurm(data_path, num_to_process, num_workers, partition, end_frame=end_frame)
     elif is_slurm_task:
         print(f"Running slurm task {slurm_task_index} ...")
-        train(data_path, slurm_task_index)
+        train(data_path, slurm_task_index, end_frame=end_frame)
     else:
         with breakpoint_on_error():
             train(data_path=data_path, slurm_task_index=0, mode='outdoor', local=local, existing_output_dir=existing_output_dir, fast=fast, end_frame=end_frame)

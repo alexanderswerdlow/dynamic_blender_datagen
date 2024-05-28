@@ -38,7 +38,7 @@ def read_obj_file(obj_path: str):
     return np.asarray(vertices), np.asarray(faces)
 
 
-def unproject(depth, K, RT):
+def unproject(depth, K, world2cam):
     H, W = depth.shape
     y, x = np.indices((H, W))
     ones = np.ones((H, W))
@@ -48,19 +48,20 @@ def unproject(depth, K, RT):
     camera_coords *= depth[..., None]
     camera_coords_hom = np.concatenate([camera_coords, ones[..., None]], axis=-1)
 
-    R = RT[:3, :3]
-    T = RT[:3, 3]
-    RT_inv = np.eye(4)
-    RT_inv[:3, :3] = R.T  # Transpose of rotation matrix R
-    RT_inv[:3, 3] = -R.T @ T  # Correct translation component
-    points = camera_coords_hom @ RT_inv.T
+    # world2cam is world -> camera so we invert
+    R = world2cam[:3, :3]
+    T = world2cam[:3, 3]
+    world2cam_inv = np.eye(4)
+    world2cam_inv[:3, :3] = R.T
+    world2cam_inv[:3, 3] = -R.T @ T
+    points = camera_coords_hom @ world2cam_inv.T
 
     return points[..., :3]
 
 
-def reprojection(points: np.ndarray, K: np.ndarray, RT: np.ndarray):
+def reprojection(points: np.ndarray, K: np.ndarray, world2cam: np.ndarray):
     v = np.concatenate((points, np.ones((points.shape[0], 1))), axis=1)
-    XYZ = (RT @ v.T).T[:, :3]
+    XYZ = (world2cam @ v.T).T[:, :3]
     Z = XYZ[:, 2:]
     XYZ = XYZ / XYZ[:, 2:]
     xyz = (K @ XYZ.T).T
@@ -117,7 +118,7 @@ def farthest_point_sampling(p, K):
     return farthest_point, idx
 
 
-def compute_camera_rays(w, h, K, RT):
+def compute_camera_rays(w, h, K, world2cam):
     j, i = np.meshgrid(np.arange(w), np.arange(h), indexing="xy")
 
     # Flatten the grid
@@ -132,12 +133,12 @@ def compute_camera_rays(w, h, K, RT):
     rays_camera = K_inv @ pixel_coords
 
     # Transform rays from camera space to world space
-    RT_inv = np.linalg.inv(RT)
+    world2cam_inv = np.linalg.inv(world2cam)
     rays_camera_homogeneous = np.vstack((rays_camera, np.ones((1, rays_camera.shape[1]))))
-    rays_world_homogeneous = RT_inv @ rays_camera_homogeneous
+    rays_world_homogeneous = world2cam_inv @ rays_camera_homogeneous
 
     # Extract the origins and directions of the rays
-    origins = RT_inv[:3, 3]
+    origins = world2cam_inv[:3, 3]
     directions = rays_world_homogeneous[:3, :] - origins[:, np.newaxis]
 
     # Normalize the directions
@@ -183,7 +184,7 @@ def tracking(cp_root: Path, data_root: Path, viz=False):
     # save_vis_dir = os.path.join(data_root, 'tracking')
 
     K_data = []
-    RT_data = []
+    world2cam_data = []
 
     R1 = np.array([[1, 0, 0, 0], [0, 0, -1, 0], [0, 1, 0, 0], [0, 0, 0, 1]])
     R2 = np.array([[-1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]])
@@ -218,8 +219,8 @@ def tracking(cp_root: Path, data_root: Path, viz=False):
     for reference_frame_idx, reference_frame in tqdm(enumerate(range(1, num_frames - 1))):
         blender_reference_frame = reference_frame + 1
         K = np.loadtxt(cam_root / f"K_{idx_to_str_4(blender_reference_frame)}.txt")
-        RT = np.loadtxt(cam_root / f"RT_{idx_to_str_4(blender_reference_frame)}.txt")
-        RT = R3 @ R2 @ RT @ R1
+        world2cam = np.loadtxt(cam_root / f"RT_{idx_to_str_4(blender_reference_frame)}.txt")
+        world2cam = R3 @ R2 @ world2cam @ R1
         depth = read_tiff(exr_root / f"depth_{idx_to_str_5(blender_reference_frame)}.tiff")
         mask = cv2.imread(str(exr_root / f"segmentation_{idx_to_str_5(blender_reference_frame)}.png"))
         img = cv2.imread(str(exr_root / f"rgb_{idx_to_str_5(blender_reference_frame)}.png"))
@@ -248,8 +249,8 @@ def tracking(cp_root: Path, data_root: Path, viz=False):
         if (exr_root / f"segmentation_{idx_to_str_5(blender_reference_frame)}.png").exists():
             shutil.copy(exr_root / f"segmentation_{idx_to_str_5(blender_reference_frame)}.png", save_mask_path)
 
-        K_data.append(K.astype(np.float16))
-        RT_data.append(RT.astype(np.float16))
+        K_data.append(K)
+        world2cam_data.append(world2cam)
 
         seg_mask = cv2.imread(str(save_mask_path))
         static_mask = (seg_mask == 0).all(-1)
@@ -258,7 +259,7 @@ def tracking(cp_root: Path, data_root: Path, viz=False):
             h, w, _ = data.shape
 
             cam_intrinsic = K
-            cam_extrinsic = RT
+            cam_extrinsic = world2cam
             depth = depth_data[reference_frame_idx].copy()
 
             rr.set_time_sequence("frame", reference_frame_idx)
@@ -296,7 +297,7 @@ def tracking(cp_root: Path, data_root: Path, viz=False):
 
             loaded_meshes[reference_frame_idx][asset_name] = mesh
 
-            origins, directions = compute_camera_rays(w, h, K, RT)
+            origins, directions = compute_camera_rays(w, h, K, world2cam)
             origins = origins.reshape(h, w, 3)
             directions = directions.reshape(h, w, 3)
 
@@ -334,7 +335,7 @@ def tracking(cp_root: Path, data_root: Path, viz=False):
                 intersection_dense = np.zeros_like(origins)
                 intersection_dense[index_ray] = intersection_points
 
-                uv_intersected, z_intersected = reprojection(intersection_dense, K, RT)
+                uv_intersected, z_intersected = reprojection(intersection_dense, K, world2cam)
                 # check distance for valid indices
                 distance_diff = z_intersected[intersection_mask].squeeze(-1) - depth.squeeze(-1)[asset_mask][intersection_mask]
 
@@ -377,7 +378,7 @@ def tracking(cp_root: Path, data_root: Path, viz=False):
                     tracked_points[reference_frame_idx][asset_name] = [points_on_mesh]
 
     K_data = np.stack(K_data, axis=0)
-    RT_data = np.stack(RT_data, axis=0)
+    world2cam_data = np.stack(world2cam_data, axis=0)
 
     max_num_pts = max([i[0].shape[0] for idx in points_to_track.keys() for i in points_to_track[idx].values()])
     window_size = len(points_to_track)
@@ -393,14 +394,16 @@ def tracking(cp_root: Path, data_root: Path, viz=False):
             unproject(
                 depth_data[reference_frame].squeeze(-1),
                 K_data[reference_frame_idx].astype(np.float32),
-                RT_data[reference_frame_idx].astype(np.float32),
+                world2cam_data[reference_frame_idx].astype(np.float32),
             ),
             "h w c -> b h w c",
             b=window_size,
         )
+        dynamic_mask = np.full_like(cur_xyz, False, dtype=bool)
 
         if viz:
             rr.log(f"world/depth_unproj", rr.Points3D(cur_xyz[0].reshape(-1, 3)))
+
         for asset_idx, asset_name in enumerate(points_to_track[reference_frame].keys()):
             _, _, _, coords = points_to_track[reference_frame][asset_name]
 
@@ -411,10 +414,11 @@ def tracking(cp_root: Path, data_root: Path, viz=False):
                 rr.log(f"world/{asset_name}/orig_depth_unproj", rr.Points3D(cur_xyz[0, coords[:, 1], coords[:, 0]]))
 
             cur_xyz[:, coords[:, 1], coords[:, 0]] = pts
+            dynamic_mask[:, coords[:, 1], coords[:, 0]] = True
 
             bs = pts.shape[0]
             pts = rearrange(pts, "b n c -> (b n) c")
-            uv, z = reprojection(pts, K_data[reference_frame_idx], RT_data[reference_frame_idx])
+            uv, z = reprojection(pts, K_data[reference_frame_idx], world2cam_data[reference_frame_idx])
 
             uv = rearrange(uv, "(b n) c -> b n c", b=bs)
             z = rearrange(z, "(b n) c -> b n c", b=bs)
@@ -431,16 +435,13 @@ def tracking(cp_root: Path, data_root: Path, viz=False):
 
         cur_xyz = cur_xyz.astype(np.float16)
         for i in range(cur_depth.shape[0]):
-            np.savez(save_dynamic_depths_root / f"depth_{idx_to_str_5(reference_frame_idx)}_{idx_to_str_5(i)}.npz", xyz=cur_xyz[i])
-
-    K_data = K_data.astype(np.float16)
-    RT_data = RT_data.astype(np.float16)
+            np.savez(save_dynamic_depths_root / f"depth_{idx_to_str_5(reference_frame_idx)}_{idx_to_str_5(i)}.npz", xyz=cur_xyz[i], dynamic_mask=dynamic_mask[i])
 
     # save annotations as npz
     np.savez(
         os.path.join(data_root, "annotations.npz"),
         intrinsics=K_data,
-        extrinsics=RT_data,
+        world2cam=world2cam_data,
         points_outside_image=points_outside_image,
     )
 

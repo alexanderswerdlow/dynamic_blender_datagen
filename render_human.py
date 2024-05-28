@@ -229,9 +229,12 @@ class Blender_render:
         bpy.context.scene.render.resolution_y = RESULOUTION_Y
         bpy.context.scene.render.resolution_percentage = 100
         # setup render sampling
-        bpy.context.scene.cycles.samples = 64
+        bpy.context.scene.cycles.samples = self.samples_per_pixel
         # setup framerate
         bpy.context.scene.render.fps = self.fps
+
+        print(f"Setting up scene with {self.samples_per_pixel} samples per pixel")
+        print(f"Setting up scene with {self.fps} fps")
 
         # scale boundingbox object
         print(f"Cube in scene: {'Cube' in bpy.data.objects.keys()}")
@@ -1030,6 +1033,9 @@ class Blender_render:
                 bpy.context.scene.camera = self.camera
 
                 # setup camera
+                extra_camera_scale = np.random.uniform(1.0, 1.4)
+                print(f"original scene_scale: {self.scale_factor}")
+                print("extra_camera_scale: ", extra_camera_scale)
                 self.cam_loc = (
                     mathutils.Vector(
                         (
@@ -1038,7 +1044,7 @@ class Blender_render:
                             np.random.uniform(1, 2.5),
                         )
                     )
-                    * self.scale_factor
+                    * self.scale_factor * extra_camera_scale
                 )
                 self.cam_lookat = mathutils.Vector((0, 0, 0.5)) * self.scale_factor
                 self.set_cam(self.cam_loc, self.cam_lookat)
