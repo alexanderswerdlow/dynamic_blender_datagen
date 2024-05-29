@@ -118,7 +118,7 @@ def train(data_path, slurm_task_index, mode=None, local=False, existing_output_d
         export_obj=existing_output_dir is None,
         export_tracking=True,
         use_gpu=True,
-        samples_per_pixel=16,
+        samples_per_pixel=64,
         fps=32,
         end_frame=512,
         batch_size=32,
@@ -133,6 +133,7 @@ def train(data_path, slurm_task_index, mode=None, local=False, existing_output_d
         args.randomize = True
         args.add_force = True
     elif mode == 'outdoor':
+        args.end_frame = random_choice([32, 64, 128, 256, 384], [0.2, 0.2, 0.2, 0.2, 0.2]) if end_frame is None else end_frame
         args.type = "human"
         args.add_smoke = False
         args.add_fog = False
@@ -146,14 +147,13 @@ def train(data_path, slurm_task_index, mode=None, local=False, existing_output_d
         args.force_scale = random_choice([0.05, 0.1, 0.25, 0.4, 0.6, 1.0], [0.1, 0.2, 0.3, 0.4, 0.4, 0.3])
         args.randomize = True
         args.scene_root = DATA_DIR / random_choice(["blender_assets/hdri_plane.blend", "demo_scene/robot.blend"], [1.0, 0.01])
-        args.end_frame = random_choice([32, 64, 128, 256, 384], [0.2, 0.2, 0.2, 0.2, 0.2])
         args.fps = random_choice([2, 5, 10, 15, 30], [0.1, 0.2, 0.2, 0.2, 0.1])
     elif mode == 'animal':
         args.type = "animal"
         args.material_path = DATA_DIR / "blender_assets" / "animal_material.blend"
     
     if fast:
-        args.samples_per_pixel = 1
+        args.samples_per_pixel = 4
         args.fps = 1
         args.end_frame = 8
         args.num_assets = 8
@@ -237,9 +237,9 @@ def run_slurm(data_path, num_chunks, num_workers, partition, exclude: bool = Fal
     print(kwargs)
     slurm = Slurm(
         "--requeue=10",
-        job_name='blender',
+        job_name=f'blender_{data_path.name}',
         cpus_per_task=4,
-        mem='24g',
+        mem='48g',
         export='ALL',
         gres=['gpu:1'],
         output=f'outputs/{Slurm.JOB_ARRAY_MASTER_ID}_{Slurm.JOB_ARRAY_ID}_{Slurm.JOB_ID}.out',
@@ -253,7 +253,6 @@ def run_slurm(data_path, num_chunks, num_workers, partition, exclude: bool = Fal
     tail_log_file(Path(f"outputs"), f"{job_id}*")
 
 import typer
-
 typer.main.get_command_name = lambda name: name
 app = typer.Typer(pretty_exceptions_show_locals=False)
 

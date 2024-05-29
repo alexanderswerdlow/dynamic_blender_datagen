@@ -1,18 +1,20 @@
-from collections import defaultdict
-import numpy as np
-import cv2
-import os
 import glob
-import matplotlib
-from utils.file_io import read_tiff, write_png
-from tqdm import tqdm
-import trimesh
-import shutil
 import json
+import os
+import shutil
+from collections import defaultdict
 from pathlib import Path
+
+import cv2
+import matplotlib
+import numpy as np
+import trimesh
+from einops import pack, rearrange, repeat, unpack
+from tqdm import tqdm
+
 import utils.plotting as plotting
 from utils.decoupled_utils import breakpoint_on_error
-from einops import repeat, pack, unpack, rearrange
+from utils.file_io import read_tiff, write_png
 
 
 def read_obj_file(obj_path: str):
@@ -36,6 +38,10 @@ def read_obj_file(obj_path: str):
     obj_f.close()
 
     return np.asarray(vertices), np.asarray(faces)
+
+def read_obj_file_triangles(obj_path: str):
+    vertices, faces = read_obj_file(obj_path)
+    return vertices[faces]
 
 
 def unproject(depth, K, world2cam):
@@ -156,13 +162,13 @@ def idx_to_str_5(idx):
     return str(idx).zfill(5)
 
 
-def tracking(cp_root: Path, data_root: Path, viz=False):
+def tracking(data_root: Path, viz=False, profile=False):
     from pathlib import Path
 
-    img_root = cp_root / "images"
-    exr_root = cp_root / "exr_img"
-    cam_root = cp_root / "cam"
-    obj_root = cp_root / "obj" if (cp_root / "obj").exists() else data_root / "obj"
+    img_root = data_root / "images"
+    exr_root = data_root / "exr_img"
+    cam_root = data_root / "cam"
+    obj_root = data_root / "obj" if (data_root / "obj").exists() else data_root / "obj"
     print("copying exr data ...")
 
     save_rgbs_root = data_root / "rgbs"
@@ -181,8 +187,6 @@ def tracking(cp_root: Path, data_root: Path, viz=False):
     num_frames = len(frames)
     print(f"num_frames: {num_frames}")
 
-    # save_vis_dir = os.path.join(data_root, 'tracking')
-
     K_data = []
     world2cam_data = []
 
@@ -190,7 +194,7 @@ def tracking(cp_root: Path, data_root: Path, viz=False):
     R2 = np.array([[-1, 0, 0, 0], [0, -1, 0, 0], [0, 0, -1, 0], [0, 0, 0, 1]])
     R3 = np.array([[-1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
 
-    scene_info = json.load(open(os.path.join(cp_root, "scene_info.json"), "r"))
+    scene_info = json.load(open(os.path.join(data_root, "scene_info.json"), "r"))
     assets = scene_info["assets"]
     pallette = plotting.hls_palette(len(assets) + 2)
 
@@ -210,14 +214,20 @@ def tracking(cp_root: Path, data_root: Path, viz=False):
         rr.log("world", rr.ViewCoordinates.RIGHT_HAND_Z_UP, static=True)
 
     points_to_track = defaultdict(dict)
-    loaded_meshes = defaultdict(dict)
+    reference_frame_idx_to_blender_frame_idx = dict()
     depth_data = dict()
+
+    cache_meshes = True
+    if cache_meshes:
+        loaded_meshes = defaultdict(dict)
 
     max_depth_value = 1000
     min_depth_value = 0
 
+    print(f"Copying data and intersecting reference camera rays with object meshes...", flush=True)
     for reference_frame_idx, reference_frame in tqdm(enumerate(range(1, num_frames - 1))):
         blender_reference_frame = reference_frame + 1
+        reference_frame_idx_to_blender_frame_idx[reference_frame_idx] = blender_reference_frame
         K = np.loadtxt(cam_root / f"K_{idx_to_str_4(blender_reference_frame)}.txt")
         world2cam = np.loadtxt(cam_root / f"RT_{idx_to_str_4(blender_reference_frame)}.txt")
         world2cam = R3 @ R2 @ world2cam @ R1
@@ -290,12 +300,14 @@ def tracking(cp_root: Path, data_root: Path, viz=False):
             asset_name = asset.replace(".", "_")
             if asset_name == "background":
                 continue
-            obj_path = os.path.join(obj_root, "{}_{}.obj".format(asset_name, str(blender_reference_frame).zfill(4)))
+
+            obj_path = os.path.join(obj_root, f"{asset_name}_{str(blender_reference_frame).zfill(4)}.obj")
             mesh = trimesh.load(str(obj_path))
             asset_mask = np.logical_and(mask[:, :, 2] == pallette[idx + 1, 0], mask[:, :, 1] == pallette[idx + 1, 1])
             asset_mask = np.logical_and(asset_mask, mask[:, :, 0] == pallette[idx + 1, 2])
 
-            loaded_meshes[reference_frame_idx][asset_name] = mesh
+            if cache_meshes:
+                loaded_meshes[reference_frame_idx][asset_name] = mesh
 
             origins, directions = compute_camera_rays(w, h, K, world2cam)
             origins = origins.reshape(h, w, 3)
@@ -309,7 +321,14 @@ def tracking(cp_root: Path, data_root: Path, viz=False):
                 rr.log("world/camera_rays", rr.Arrows3D(origins=origins, vectors=directions * 5))
 
             # Perform ray-mesh intersection using trimesh
-            ray_mesh_intersector = trimesh.ray.ray_pyembree.RayMeshIntersector(mesh, scale_to_box=False)
+            if False:
+                ray_module = trimesh.ray.ray_triangle
+                ray_kwargs = dict()
+            else:
+                ray_module = trimesh.ray.ray_pyembree
+                ray_kwargs = dict(scale_to_box=False)
+
+            ray_mesh_intersector = ray_module.RayMeshIntersector(mesh, **ray_kwargs)
             intersection_points, index_ray, index_faces = ray_mesh_intersector.intersects_location(
                 ray_origins=origins, ray_directions=directions, multiple_hits=False
             )
@@ -349,33 +368,66 @@ def tracking(cp_root: Path, data_root: Path, viz=False):
                     rr.Arrows3D(origins=init_ray + endpoints, vectors=camera_ray_dirs * distance_diff[..., None]),
                 )
 
+        if profile and reference_frame_idx > 32:
+            break
+
+    print(f"Tracking points in other frames...", flush=True)
     tracked_points = defaultdict(dict)
-    for reference_frame_idx in sorted(points_to_track.keys()):
+
+    if profile:
+        from viztracer import VizTracer
+        tracer = VizTracer(tracer_entries=2000000)
+        tracer.start()
+
+    for reference_frame_idx in tqdm(sorted(points_to_track.keys())):
         if viz:
             rr.set_time_sequence("frame", reference_frame_idx)
         for asset_name in points_to_track[reference_frame_idx].keys():
             intersection_points, intersection_points_barycentric_coordinates, index_faces, asset_pixel_coords = points_to_track[reference_frame_idx][
                 asset_name
             ]
-            for idx, target_frame_idx in enumerate(sorted(points_to_track.keys())):
-                points_on_mesh = trimesh.triangles.barycentric_to_points(
-                    loaded_meshes[target_frame_idx][asset_name].triangles[index_faces], intersection_points_barycentric_coordinates
-                )
-                if viz and abs(reference_frame_idx - target_frame_idx) < 4:
-                    rr.log(f"world/{asset_name}/{idx}_tracked_3d_frame_pos", rr.Points3D(points_on_mesh))
-                    if asset_name in tracked_points[reference_frame_idx] and len(tracked_points[reference_frame_idx][asset_name]) != 0:
-                        rr.log(
-                            f"world/{asset_name}/{idx}_tracked_3d_delta_frame_diff",
-                            rr.Arrows3D(
-                                origins=tracked_points[reference_frame_idx][asset_name][-1],
-                                vectors=points_on_mesh - tracked_points[reference_frame_idx][asset_name][-1],
-                            ),
-                        )
 
-                if asset_name in tracked_points[reference_frame_idx]:
-                    tracked_points[reference_frame_idx][asset_name].append(points_on_mesh)
-                else:
-                    tracked_points[reference_frame_idx][asset_name] = [points_on_mesh]
+            if True:
+                all_object_triangles = np.stack([loaded_meshes[target_frame_idx][asset_name].triangles for idx, target_frame_idx in enumerate(sorted(points_to_track.keys()))], axis=0)
+                all_points = rearrange(all_object_triangles[:, index_faces], 'b n ... -> (b n) ...')
+                all_barycentric_coords = repeat(intersection_points_barycentric_coordinates, 'n c -> (b n) c', b=all_object_triangles.shape[0])
+                all_points_on_mesh = trimesh.triangles.barycentric_to_points(all_points, all_barycentric_coords)
+                all_points_on_mesh = rearrange(all_points_on_mesh, '(b n) ... -> b n ...', b=all_object_triangles.shape[0])
+                tracked_points[reference_frame_idx][asset_name] = all_points_on_mesh
+            else:
+                for idx, target_frame_idx in enumerate(sorted(points_to_track.keys())):
+                    if cache_meshes:
+                        mesh = loaded_meshes[target_frame_idx][asset_name]
+                        triangles = mesh.triangles
+                    else:
+                        obj_path = os.path.join(
+                            obj_root, f"{asset_name}_{str(reference_frame_idx_to_blender_frame_idx[reference_frame_idx]).zfill(4)}.obj"
+                        )
+                        triangles = read_obj_file_triangles(str(obj_path))
+
+                    points_on_mesh = trimesh.triangles.barycentric_to_points(triangles[index_faces], intersection_points_barycentric_coordinates)
+                    if viz and abs(reference_frame_idx - target_frame_idx) < 4:
+                        rr.log(f"world/{asset_name}/{idx}_tracked_3d_frame_pos", rr.Points3D(points_on_mesh))
+                        if asset_name in tracked_points[reference_frame_idx] and len(tracked_points[reference_frame_idx][asset_name]) != 0:
+                            rr.log(
+                                f"world/{asset_name}/{idx}_tracked_3d_delta_frame_diff",
+                                rr.Arrows3D(
+                                    origins=tracked_points[reference_frame_idx][asset_name][-1],
+                                    vectors=points_on_mesh - tracked_points[reference_frame_idx][asset_name][-1],
+                                ),
+                            )
+
+                    if asset_name in tracked_points[reference_frame_idx]:
+                        tracked_points[reference_frame_idx][asset_name].append(points_on_mesh)
+                    else:
+                        tracked_points[reference_frame_idx][asset_name] = [points_on_mesh]
+        if profile and reference_frame_idx > 1:
+            break
+
+    if profile:
+        tracer.stop()
+        tracer.save()
+        exit()
 
     K_data = np.stack(K_data, axis=0)
     world2cam_data = np.stack(world2cam_data, axis=0)
@@ -383,10 +435,14 @@ def tracking(cp_root: Path, data_root: Path, viz=False):
     max_num_pts = max([i[0].shape[0] for idx in points_to_track.keys() for i in points_to_track[idx].values()])
     window_size = len(points_to_track)
     num_objects = len(points_to_track[next(iter(points_to_track.keys()))].keys())
-    pixel_aligned_tracks = np.full((len(points_to_track), window_size, num_objects, max_num_pts, 3), dtype=np.float16, fill_value=np.nan)
 
-    points_outside_image = np.full((len(points_to_track), window_size, num_objects), dtype=np.int32, fill_value=0)
-    for reference_frame_idx, reference_frame in enumerate(points_to_track.keys()):
+    save_tracks = False
+    if save_tracks:
+        pixel_aligned_tracks = np.full((len(points_to_track), window_size, num_objects, max_num_pts, 3), dtype=np.float16, fill_value=np.nan)
+        points_outside_image = np.full((len(points_to_track), window_size, num_objects), dtype=np.uint32, fill_value=0)
+
+    print(f"Saving...")
+    for reference_frame_idx, reference_frame in tqdm(enumerate(points_to_track.keys())):
         if viz:
             rr.set_time_sequence("frame", reference_frame_idx)
         cur_depth = repeat(depth_data[reference_frame], "h w () -> b h w ()", b=len(points_to_track))
@@ -399,7 +455,7 @@ def tracking(cp_root: Path, data_root: Path, viz=False):
             "h w c -> b h w c",
             b=window_size,
         )
-        dynamic_mask = np.full_like(cur_xyz, False, dtype=bool)
+        dynamic_mask = np.full_like(cur_xyz[..., 0], False, dtype=bool)
 
         if viz:
             rr.log(f"world/depth_unproj", rr.Points3D(cur_xyz[0].reshape(-1, 3)))
@@ -407,8 +463,14 @@ def tracking(cp_root: Path, data_root: Path, viz=False):
         for asset_idx, asset_name in enumerate(points_to_track[reference_frame].keys()):
             _, _, _, coords = points_to_track[reference_frame][asset_name]
 
-            pts = np.stack(tracked_points[reference_frame][asset_name], axis=0)
-            pixel_aligned_tracks[reference_frame_idx, :, asset_idx, : tracked_points[reference_frame][asset_name][0].shape[0], :] = pts
+            _data = tracked_points[reference_frame][asset_name]
+            if type(_data) == list:
+                pts = np.stack(_data, axis=0)
+            else:
+                pts = _data
+
+            if save_tracks:
+                pixel_aligned_tracks[reference_frame_idx, :, asset_idx, : tracked_points[reference_frame][asset_name][0].shape[0], :] = pts
 
             if viz:
                 rr.log(f"world/{asset_name}/orig_depth_unproj", rr.Points3D(cur_xyz[0, coords[:, 1], coords[:, 0]]))
@@ -425,9 +487,10 @@ def tracking(cp_root: Path, data_root: Path, viz=False):
             cur_depth[:, coords[:, 1], coords[:, 0]] = z
 
             within_bounds = (uv[..., 0] >= 0) & (uv[..., 0] < w) & (uv[..., 1] >= 0) & (uv[..., 1] < h)
-            
-            for i in range(bs):
-                points_outside_image[reference_frame_idx, i, asset_idx] = (~within_bounds[i]).sum()
+
+            if save_tracks:
+                for i in range(bs):
+                    points_outside_image[reference_frame_idx, i, asset_idx] = (~within_bounds[i]).sum()
 
         if viz:
             for i in range(cur_depth.shape[0]):
@@ -435,22 +498,20 @@ def tracking(cp_root: Path, data_root: Path, viz=False):
 
         cur_xyz = cur_xyz.astype(np.float16)
         for i in range(cur_depth.shape[0]):
-            np.savez(save_dynamic_depths_root / f"depth_{idx_to_str_5(reference_frame_idx)}_{idx_to_str_5(i)}.npz", xyz=cur_xyz[i], dynamic_mask=dynamic_mask[i])
+            np.savez(
+                save_dynamic_depths_root / f"depth_{idx_to_str_5(reference_frame_idx)}_{idx_to_str_5(i)}.npz",
+                xyz=cur_xyz[i],
+                dynamic_mask=dynamic_mask[i],
+            )
 
-    # save annotations as npz
-    np.savez(
-        os.path.join(data_root, "annotations.npz"),
-        intrinsics=K_data,
-        world2cam=world2cam_data,
-        points_outside_image=points_outside_image,
-    )
+    np.savez(os.path.join(data_root, "annotations.npz"), intrinsics=K_data, world2cam=world2cam_data)
 
-    np.savez_compressed(
-        os.path.join(data_root, "pixel_aligned_tracks.npz"),
-        pixel_aligned_tracks=pixel_aligned_tracks,
-    )
+    if save_tracks:
+        np.savez_compressed(
+            os.path.join(data_root, "pixel_aligned_tracks.npz"), pixel_aligned_tracks=pixel_aligned_tracks, points_outside_image=points_outside_image
+        )
 
-    return pixel_aligned_tracks
+    return None
 
 
 if __name__ == "__main__":
@@ -460,7 +521,10 @@ if __name__ == "__main__":
     parser.add_argument("--data_root", type=Path, default="results/outdoor/0")
     parser.add_argument("--cp_root", type=Path, default="results/outdoor/0")
     parser.add_argument("--viz", action="store_true")
+    parser.add_argument("--profile", action="store_true")
     args = parser.parse_args()
 
+    print(f"Exporting tracks for {args.data_root}")
+
     with breakpoint_on_error():
-        tracking(args.cp_root, args.data_root, args.viz)
+        tracking(args.data_root, args.viz, args.profile)
