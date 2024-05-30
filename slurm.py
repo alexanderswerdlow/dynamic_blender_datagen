@@ -68,26 +68,38 @@ node_gpus = {
     "matrix-2-33": "3090",
     "matrix-2-37": "3090",
     "matrix-3-26": "A5500",
-    "matrix-3-28": "A5500"
+    "matrix-3-28": "A5500",
 }
+
 
 def get_excluded_nodes(*args):
     return ",".join([x for x in node_gpus.keys() if not any(s in node_gpus[x] for s in args)])
 
+
 def signal_handler(signum, frame):
     raise KeyboardInterrupt
+
 
 def random_choice(objects, weights):
     total_weight = sum(weights)
     probabilities = [w / total_weight for w in weights]
     return random.choices(objects, probabilities)[0]
 
-def train(data_path, slurm_task_index, mode=None, local=False, existing_output_dir: Optional[Path] = None, fast: bool = False, end_frame: Optional[int] = None):
+
+def train(
+    data_path,
+    slurm_task_index,
+    mode=None,
+    local=False,
+    existing_output_dir: Optional[Path] = None,
+    fast: bool = False,
+    end_frame: Optional[int] = None,
+):
     device = "cuda" if torch.cuda.is_available() else "cpu"
     try:
-        job_id = os.getenv('SLURM_JOB_ID')
-        job_array_id = os.getenv('SLURM_ARRAY_JOB_ID')
-        job_index = os.getenv('SLURM_ARRAY_TASK_ID')
+        job_id = os.getenv("SLURM_JOB_ID")
+        job_array_id = os.getenv("SLURM_ARRAY_JOB_ID")
+        job_index = os.getenv("SLURM_ARRAY_TASK_ID")
         addr = None
         info_str = f"{os.getpid()} {socket.gethostname()} {device} {job_id} {addr}"
         print(f"Starting inference on {info_str}")
@@ -101,11 +113,8 @@ def train(data_path, slurm_task_index, mode=None, local=False, existing_output_d
 
     if mode is None:
         import random
-        mode_probabilities = {
-            'indoor': 0.0,
-            'robot': 0.0,
-            'outdoor': 1.00,
-        }
+
+        mode_probabilities = {"indoor": 0.0, "robot": 0.0, "outdoor": 1.00}
 
         modes = list(mode_probabilities.keys())
         probabilities = list(mode_probabilities.values())
@@ -122,17 +131,17 @@ def train(data_path, slurm_task_index, mode=None, local=False, existing_output_d
         fps=32,
         end_frame=512,
         batch_size=32,
-        background_hdr_path = DATA_DIR / 'hdri'
+        background_hdr_path=DATA_DIR / "hdri",
     )
 
     if local is False:
         args.use_singularity = True
 
-    if mode == 'indoor':
+    if mode == "indoor":
         args.add_fog = True
         args.randomize = True
         args.add_force = True
-    elif mode == 'outdoor':
+    elif mode == "outdoor":
         args.end_frame = random_choice([32, 64, 128, 256, 384], [0.2, 0.2, 0.2, 0.2, 0.2]) if end_frame is None else end_frame
         args.type = "human"
         args.add_smoke = False
@@ -140,18 +149,17 @@ def train(data_path, slurm_task_index, mode=None, local=False, existing_output_d
         args.num_assets = random_choice([2, 5, 8, 10, 12, 15], [0.1, 0.2, 0.5, 0.5, 0.2, 0.1])
         args.add_force = random_choice([True, False], [0.5, 0.5])
         args.force_interval = random_choice(
-            [args.end_frame // 1, args.end_frame // 2, args.end_frame // 4, args.end_frame // 8, args.end_frame // 16],
-            [0.3, 0.5, 0.5, 0.3, 0.05]
+            [args.end_frame // 1, args.end_frame // 2, args.end_frame // 4, args.end_frame // 8, args.end_frame // 16], [0.3, 0.5, 0.5, 0.3, 0.05]
         )
         args.force_step = random_choice([1, 2, 3, 4, 5], [0.6, 0.3, 0.2, 0.05, 0.05])
         args.force_scale = random_choice([0.05, 0.1, 0.25, 0.4, 0.6, 1.0], [0.1, 0.2, 0.3, 0.4, 0.4, 0.3])
         args.randomize = True
         args.scene_root = DATA_DIR / random_choice(["blender_assets/hdri_plane.blend", "demo_scene/robot.blend"], [1.0, 0.01])
         args.fps = random_choice([2, 5, 10, 15, 30], [0.1, 0.2, 0.2, 0.2, 0.1])
-    elif mode == 'animal':
+    elif mode == "animal":
         args.type = "animal"
         args.material_path = DATA_DIR / "blender_assets" / "animal_material.blend"
-    
+
     if fast:
         args.samples_per_pixel = 4
         args.fps = 1
@@ -178,21 +186,18 @@ def train(data_path, slurm_task_index, mode=None, local=False, existing_output_d
 
     output_dir.mkdir(parents=True, exist_ok=True)
     args.output_dir = output_dir
-    
+
     with open(output_dir / "slurm_metadata.txt", "w") as f:
         f.write(f"{os.getpid()} {socket.gethostname()} {device} {job_id} {addr}\n")
-        slurm_env_vars = [
-            "SLURM_JOB_ID", "SLURM_ARRAY_JOB_ID", "SLURM_ARRAY_TASK_ID",
-            "SLURM_JOB_NODELIST", "SLURM_SUBMIT_DIR", "SLURM_CLUSTER_NAME"
-        ]
+        slurm_env_vars = ["SLURM_JOB_ID", "SLURM_ARRAY_JOB_ID", "SLURM_ARRAY_TASK_ID", "SLURM_JOB_NODELIST", "SLURM_SUBMIT_DIR", "SLURM_CLUSTER_NAME"]
         for var in slurm_env_vars:
             f.write(f"{var}={os.getenv(var, 'Not Set')}\n")
-        
+
         f.write("\n")
         for field in args.__dataclass_fields__:
             f.write(f"{field} = {getattr(args, field)}\n")
-    
-    initial_log_file = Path('outputs') / f"{job_array_id}_{job_index}_{job_id}.out"
+
+    initial_log_file = Path("outputs") / f"{job_array_id}_{job_index}_{job_id}.out"
 
     try:
         os.symlink(initial_log_file.resolve(), output_dir / "log.out")
@@ -201,6 +206,7 @@ def train(data_path, slurm_task_index, mode=None, local=False, existing_output_d
 
     render(args)
     print(f"Finished rendering {output_dir}")
+
 
 def tail_log_file(log_file_path, glob_str):
     max_retries = 60
@@ -212,10 +218,10 @@ def tail_log_file(log_file_path, glob_str):
         try:
             if len(list(log_file_path.glob(glob_str))) > 0:
                 try:
-                    proc = subprocess.Popen(['tail', '-f', "-n", "+1", f"{log_file_path}/{glob_str}"], stdout=subprocess.PIPE)
-                    print(['tail', '-f', "-n", "+1", f"{log_file_path}/{glob_str}"])
-                    for line in iter(proc.stdout.readline, b''):
-                        print(line.decode('utf-8'), end='')
+                    proc = subprocess.Popen(["tail", "-f", "-n", "+1", f"{log_file_path}/{glob_str}"], stdout=subprocess.PIPE)
+                    print(["tail", "-f", "-n", "+1", f"{log_file_path}/{glob_str}"])
+                    for line in iter(proc.stdout.readline, b""):
+                        print(line.decode("utf-8"), end="")
                 except:
                     proc.terminate()
         except:
@@ -231,30 +237,37 @@ def run_slurm(data_path, num_chunks, num_workers, partition, exclude: bool = Fal
     from simple_slurm import Slurm
 
     kwargs = dict()
-    if partition == 'all' and exclude:
-        kwargs['exclude'] = get_excluded_nodes("volta", "2080Ti")
+    if partition == "all" and exclude:
+        kwargs["exclude"] = get_excluded_nodes("volta", "2080Ti")
 
     print(kwargs)
     slurm = Slurm(
         "--requeue=10",
-        job_name=f'blender_{data_path.name}',
+        job_name=f"blender_{data_path.name}",
         cpus_per_task=4,
-        mem='20g',
-        export='ALL',
-        gres=['gpu:1'],
-        output=f'outputs/{Slurm.JOB_ARRAY_MASTER_ID}_{Slurm.JOB_ARRAY_ID}_{Slurm.JOB_ID}.out',
-        time=timedelta(days=3, hours=0, minutes=0, seconds=0) if 'kate' in partition else timedelta(days=0, hours=6, minutes=0, seconds=0),
+        mem="20g",
+        export="ALL",
+        gres=["gpu:1"],
+        output=f"outputs/{Slurm.JOB_ARRAY_MASTER_ID}_{Slurm.JOB_ARRAY_ID}_{Slurm.JOB_ID}.out",
+        time=timedelta(days=3, hours=0, minutes=0, seconds=0) if "kate" in partition else timedelta(days=0, hours=6, minutes=0, seconds=0),
         array=f"0-{num_chunks-1}%{num_workers}",
         partition=partition,
-        **kwargs
+        **kwargs,
     )
-    job_id = slurm.sbatch(f"python slurm.py --data_path={data_path} --is_slurm_task --slurm_task_index=$SLURM_ARRAY_TASK_ID --end_frame={end_frame}")
+
+    run_str = f"python slurm.py --data_path={data_path} --is_slurm_task --slurm_task_index=$SLURM_ARRAY_TASK_ID"
+    if end_frame is not None:
+        run_str += f" --end_frame={end_frame}"
+    job_id = slurm.sbatch(run_str)
     print(f"Submitted job {job_id} with {num_chunks} tasks and {num_workers} workers...")
     tail_log_file(Path(f"outputs"), f"{job_id}*")
 
+
 import typer
+
 typer.main.get_command_name = lambda name: name
 app = typer.Typer(pretty_exceptions_show_locals=False)
+
 
 @app.command()
 def main(
@@ -264,11 +277,11 @@ def main(
     use_slurm: bool = False,
     is_slurm_task: bool = False,
     slurm_task_index: int = None,
-    partition: str = 'all',
+    partition: str = "all",
     existing_output_dir: Optional[Path] = None,
     local: bool = False,
     fast: bool = False,
-    end_frame: Optional[int] = None
+    end_frame: Optional[int] = None,
 ):
     if use_slurm:
         run_slurm(data_path, num_to_process, num_workers, partition, end_frame=end_frame)
@@ -277,7 +290,16 @@ def main(
         train(data_path, slurm_task_index, end_frame=end_frame)
     else:
         with breakpoint_on_error():
-            train(data_path=data_path, slurm_task_index=0, mode='outdoor', local=local, existing_output_dir=existing_output_dir, fast=fast, end_frame=end_frame)
-    
-if __name__ == '__main__':
+            train(
+                data_path=data_path,
+                slurm_task_index=0,
+                mode="outdoor",
+                local=local,
+                existing_output_dir=existing_output_dir,
+                fast=fast,
+                end_frame=end_frame,
+            )
+
+
+if __name__ == "__main__":
     app()

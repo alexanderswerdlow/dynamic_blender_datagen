@@ -161,16 +161,19 @@ def render(args: RenderArgs):
         exr_script = f"{python_path} {str(current_path / 'utils' / 'openexr_utils.py')} --data_dir {args.output_dir} --output_dir {args.output_dir}/exr_img --batch_size {args.batch_size} --frame_idx {args.frame_idx}" + postfix
         run_command(exr_script)
 
-    if args.export_tracking:
-        tracking_script = f"{python_path} {str(current_path / 'export_tracks.py')} --data_root {args.output_dir}" + postfix
-        run_command(tracking_script)
+    if args.end_frame < 64:
+        if args.export_tracking:
+            tracking_script = f"{python_path} {str(current_path / 'export_tracks.py')} --data_root {args.output_dir}" + postfix
+            run_command(tracking_script)
 
-    if args.remove_temporary_files:
-        exr_path = args.output_dir / 'exr'
-        if exr_path.exists():
-            shutil.rmtree(exr_path)
-        else:
-            raise ValueError(f"exr_path {exr_path} does not exist")
+        if args.remove_temporary_files:
+            exr_path = args.output_dir / 'exr'
+            if exr_path.exists():
+                shutil.rmtree(exr_path)
+            else:
+                raise ValueError(f"exr_path {exr_path} does not exist")
+    else:
+        print(f"End frame is {args.end_frame}, skipping exporting tracking and removing temporary files. You must export tracks separately.")
 
 
 if __name__ == '__main__':

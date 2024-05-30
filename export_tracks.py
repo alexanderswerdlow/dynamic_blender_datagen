@@ -457,6 +457,7 @@ def tracking(data_root: Path, viz=False, profile=False):
             "h w c -> b h w c",
             b=window_size,
         )
+
         dynamic_mask = np.full_like(cur_xyz[..., 0], False, dtype=bool)
 
         if viz:
@@ -500,7 +501,7 @@ def tracking(data_root: Path, viz=False, profile=False):
 
         cur_xyz = cur_xyz.astype(np.float16)
         for i in range(cur_depth.shape[0]):
-            np.savez(
+            np.savez_compressed(
                 save_dynamic_depths_root / f"depth_{idx_to_str_5(reference_frame_idx)}_{idx_to_str_5(i)}.npz",
                 xyz=cur_xyz[i],
                 dynamic_mask=dynamic_mask[i],
