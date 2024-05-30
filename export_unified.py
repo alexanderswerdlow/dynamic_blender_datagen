@@ -162,7 +162,7 @@ def render(args: RenderArgs):
         run_command(exr_script)
 
     if args.export_tracking:
-        tracking_script = f"{python_path} {str(current_path / 'export_tracks.py')} --data_root {args.output_dir} --cp_root {args.output_dir}" + postfix
+        tracking_script = f"{python_path} {str(current_path / 'export_tracks.py')} --data_root {args.output_dir}" + postfix
         run_command(tracking_script)
 
     if args.remove_temporary_files:

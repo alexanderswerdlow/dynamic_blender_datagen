@@ -977,7 +977,7 @@ class Blender_render:
         focal = camdata.lens  # mm
         sensor_width = camdata.sensor_width  # mm
         sensor_height = camdata.sensor_height  # mm
-        scene_info = {"sensor_width": sensor_width, "sensor_height": sensor_height, "focal_length": focal, "assets": ["background"]}
+        scene_info = {"sensor_width": sensor_width, "sensor_height": sensor_height, "focal_length": focal, "assets": ["background"], "fps": bpy.context.scene.render.fps}
         scene_info["assets"] += [x.data.name for x in self.assets_set]
         scene_info["character"] = self.character_name
         json.dump(scene_info, open(os.path.join(self.scratch_dir, "scene_info.json"), "w"))

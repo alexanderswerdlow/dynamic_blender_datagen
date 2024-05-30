@@ -163,7 +163,7 @@ def idx_to_str_5(idx):
 
 
 def tracking(data_root: Path, viz=False, profile=False):
-    from pathlib import Path
+    print(f"Exporting tracks for {data_root}")
 
     img_root = data_root / "images"
     exr_root = data_root / "exr_img"
@@ -436,10 +436,12 @@ def tracking(data_root: Path, viz=False, profile=False):
     window_size = len(points_to_track)
     num_objects = len(points_to_track[next(iter(points_to_track.keys()))].keys())
 
+    points_outside_image = np.full((len(points_to_track), window_size, num_objects), dtype=np.int64, fill_value=-1)
+    points_inside_image = np.full((len(points_to_track), window_size, num_objects), dtype=np.int64, fill_value=-1)
+
     save_tracks = False
     if save_tracks:
         pixel_aligned_tracks = np.full((len(points_to_track), window_size, num_objects, max_num_pts, 3), dtype=np.float16, fill_value=np.nan)
-        points_outside_image = np.full((len(points_to_track), window_size, num_objects), dtype=np.uint32, fill_value=0)
 
     print(f"Saving...")
     for reference_frame_idx, reference_frame in tqdm(enumerate(points_to_track.keys())):
@@ -488,9 +490,9 @@ def tracking(data_root: Path, viz=False, profile=False):
 
             within_bounds = (uv[..., 0] >= 0) & (uv[..., 0] < w) & (uv[..., 1] >= 0) & (uv[..., 1] < h)
 
-            if save_tracks:
-                for i in range(bs):
-                    points_outside_image[reference_frame_idx, i, asset_idx] = (~within_bounds[i]).sum()
+            for i in range(bs):
+                points_outside_image[reference_frame_idx, i, asset_idx] = (~within_bounds[i]).sum()
+                points_inside_image[reference_frame_idx, i, asset_idx] = within_bounds[i].sum()
 
         if viz:
             for i in range(cur_depth.shape[0]):
@@ -510,21 +512,44 @@ def tracking(data_root: Path, viz=False, profile=False):
         np.savez_compressed(
             os.path.join(data_root, "pixel_aligned_tracks.npz"), pixel_aligned_tracks=pixel_aligned_tracks, points_outside_image=points_outside_image
         )
-
+    else:
+        np.savez_compressed(
+            os.path.join(data_root, "track_metadata.npz"), 
+            points_outside_image=points_outside_image,
+            points_inside_image=points_inside_image,
+            # **{f"{asset_name}":points_inside_image[:, :, i] for i, asset_name in enumerate(points_to_track[next(iter(points_to_track.keys()))].keys())}
+        )
+    
     return None
 
 
-if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--data_root", type=Path, default="results/outdoor/0")
-    parser.add_argument("--cp_root", type=Path, default="results/outdoor/0")
-    parser.add_argument("--viz", action="store_true")
-    parser.add_argument("--profile", action="store_true")
-    args = parser.parse_args()
-
-    print(f"Exporting tracks for {args.data_root}")
-
+def run_single_scene(**kwargs):
     with breakpoint_on_error():
-        tracking(args.data_root, args.viz, args.profile)
+        tracking(**kwargs)
+import typer
+
+typer.main.get_command_name = lambda name: name
+app = typer.Typer(pretty_exceptions_show_locals=False)
+
+@app.command()
+def main(
+    data_root: Path = Path("results/outdoor/0"),
+    viz: bool = False,
+    profile: bool = False,
+    recursive: bool = False,
+):
+    print(f"Running with dir: {data_root}")
+    if recursive:
+        scene_list = [p.parent.relative_to(data_root) for p in data_root.rglob("scene_info.json")]
+        print(scene_list)
+        for scene in scene_list:
+            if (data_root / scene / "track_metadata.npz").exists():
+                print(f"Skipping {scene}")
+                continue
+            print(f"Running with scene: {scene}")
+            run_single_scene(data_root=data_root / scene, viz=viz, profile=profile)
+    else:
+        run_single_scene(data_root=data_root, viz=viz, profile=profile)
+
+if __name__ == "__main__":
+    app()

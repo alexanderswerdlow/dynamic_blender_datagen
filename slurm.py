@@ -137,7 +137,7 @@ def train(data_path, slurm_task_index, mode=None, local=False, existing_output_d
         args.type = "human"
         args.add_smoke = False
         args.add_fog = False
-        args.num_assets = random_choice([2, 5, 8, 10, 15], [0.1, 0.2, 0.5, 0.2, 0.05])
+        args.num_assets = random_choice([2, 5, 8, 10, 12, 15], [0.1, 0.2, 0.5, 0.5, 0.2, 0.1])
         args.add_force = random_choice([True, False], [0.5, 0.5])
         args.force_interval = random_choice(
             [args.end_frame // 1, args.end_frame // 2, args.end_frame // 4, args.end_frame // 8, args.end_frame // 16],
@@ -239,7 +239,7 @@ def run_slurm(data_path, num_chunks, num_workers, partition, exclude: bool = Fal
         "--requeue=10",
         job_name=f'blender_{data_path.name}',
         cpus_per_task=4,
-        mem='48g',
+        mem='20g',
         export='ALL',
         gres=['gpu:1'],
         output=f'outputs/{Slurm.JOB_ARRAY_MASTER_ID}_{Slurm.JOB_ARRAY_ID}_{Slurm.JOB_ID}.out',
