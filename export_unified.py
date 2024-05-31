@@ -49,10 +49,8 @@ class RenderArgs():
     # Human
     sampling_points: int = 5000
     character_root: Path = DATA_DIR / 'robots'
-    use_character: Path = None
     motion_root: Path = DATA_DIR / 'motions'
     scene_root: Path = DATA_DIR / 'blender_assets' / 'hdri_plane.blend'
-    indoor_scale: bool = False
     partnet_root: Path = DATA_DIR / 'partnet'
     gso_root: Path = DATA_DIR / 'GSO'
     render_engine: str = 'CYCLES'
@@ -64,9 +62,11 @@ class RenderArgs():
     num_assets: int = 5
 
     # Animal
-    animal_root: Path = DATA_DIR / 'deformingthings4d'
+    animal_path: Path = DATA_DIR / 'deformingthings4d'
     add_smoke: bool = False
     animal_name: str = None
+    use_animal: bool = False
+    indoor: bool = False
 
 
 def render(args: RenderArgs):
@@ -76,82 +76,42 @@ def render(args: RenderArgs):
     print(f"Rendering type: {args.type}")
     
     blender_path = f'singularity run --bind {os.getcwd()}/singularity/config:/.config --nv singularity/blender.sif' if args.use_singularity else 'blender'
-    if args.type is None:
-        if args.rendering:
-            rendering_script = (
-                f"{blender_path} --background --python {current_path}/render_single.py -- "
-                f"--output_dir {args.output_dir} "
-                f"--scene {args.scene_dir} "
-                f"--render_engine CYCLES "
-                f"--samples_per_pixel {args.samples_per_pixel} "
-                f"--background_hdr_path {args.background_hdr_path} "
-                f"--end_frame {args.end_frame} "
-            )
-            if args.use_gpu:
-                rendering_script += ' --use_gpu'
-            if args.add_fog:
-                rendering_script += ' --add_fog'
-                rendering_script += f' --fog_path {args.fog_path}'
-            if args.randomize:
-                rendering_script += ' --randomize '
-            if args.material_path is not None:
-                rendering_script += f' --material_path {args.material_path}'
+    rendering_script = (
+        f"{blender_path} --background --python render_human.py -- "
+        f"--output_dir {args.output_dir} --character_root {args.character_root} "
+        f"--partnet_root {args.partnet_root} --gso_root {args.gso_root} "
+        f"--background_hdr_path {args.background_hdr_path} --scene_root {args.scene_root} "
+        f"--camera_root {args.camera_root} --num_assets {args.num_assets} "
+        f"--render_engine {args.render_engine} --force_num {args.force_num} "
+        f"--force_step {args.force_step} --force_interval {args.force_interval} "
+        f"--end_frame {args.end_frame} "
+        f"--fps {args.fps} "
+        f"--samples_per_pixel {args.samples_per_pixel} "
+        f"--scene_scale {args.scene_scale} --force_scale {args.force_scale} "
+        f"--animal_path {args.animal_path} "
+    )
+    if args.use_gpu:
+        rendering_script += ' --use_gpu'
+    if args.add_fog:
+        rendering_script += ' --add_fog'
+        rendering_script += f' --fog_path {args.fog_path}'
+    if args.randomize:
+        rendering_script += ' --randomize'
+    if args.material_path is not None:
+        rendering_script += f' --material_path {args.material_path}'
+    if args.add_smoke:
+        rendering_script += ' --add_smoke'
+    if args.add_force:
+        rendering_script += ' --add_force'
+    if args.use_animal:
+        rendering_script += ' --use_animal'
+    if args.indoor:
+        rendering_script += ' --indoor'
 
-            run_command(rendering_script)
-    else:
-        if args.rendering:
-            if args.type == 'animal':
-                rendering_script = (
-                    f"{blender_path} --background --python {current_path}/render_animal.py -- "
-                    f"--output_dir {args.output_dir} --partnet_root {args.partnet_root} "
-                    f"--gso_root {args.gso_root} --background_hdr_path {args.background_hdr_path} "
-                    f"--animal_root {args.animal_root} --camera_root {args.camera_root} "
-                    f"--num_assets {args.num_assets} --render_engine {args.render_engine} "
-                    f"--force_num {args.force_num} --force_step {args.force_step} "
-                    f"--force_interval {args.force_interval} --material_path {args.material_path} "
-                )
-                if args.use_gpu:
-                    rendering_script += ' --use_gpu'
-                if args.add_force:
-                    rendering_script += ' --add_force'
-                if args.add_smoke:
-                    rendering_script += ' --add_smoke'
-                if args.animal_name is not None:
-                    rendering_script += f' --animal_name {args.animal_name}'
-                run_command(rendering_script)
-            elif args.type == 'human':
-                rendering_script = (
-                    f"{blender_path} --background --python render_human.py -- "
-                    f"--output_dir {args.output_dir} --character_root {args.character_root} "
-                    f"--partnet_root {args.partnet_root} --gso_root {args.gso_root} "
-                    f"--background_hdr_path {args.background_hdr_path} --scene_root {args.scene_root} "
-                    f"--camera_root {args.camera_root} --num_assets {args.num_assets} "
-                    f"--render_engine {args.render_engine} --force_num {args.force_num} "
-                    f"--force_step {args.force_step} --force_interval {args.force_interval} "
-                    f"--end_frame {args.end_frame} "
-                    f"--fps {args.fps} "
-                    f"--samples_per_pixel {args.samples_per_pixel} "
-                    f"--scene_scale {args.scene_scale} --force_scale {args.force_scale} "
-                )
-                if args.use_gpu:
-                    rendering_script += ' --use_gpu'
-                if args.add_fog:
-                    rendering_script += ' --add_fog'
-                    rendering_script += f' --fog_path {args.fog_path}'
-                if args.randomize:
-                    rendering_script += ' --randomize'
-                if args.material_path is not None:
-                    rendering_script += f' --material_path {args.material_path}'
-                if args.add_smoke:
-                    rendering_script += ' --add_smoke'
-                if args.add_force:
-                    rendering_script += ' --add_force'
-                run_command(rendering_script)
-            else:
-                raise ValueError('Invalid type')
+    run_command(rendering_script)
 
     if args.export_obj:
-        obj_script = f"{blender_path} --background --python {str(current_path / 'utils' / ('export_scene.py' if args.type is None else 'export_obj.py'))} \
+        obj_script = f"{blender_path} --background --python {str(current_path / 'utils' / ('export_scene.py' if args.indoor is None else 'export_obj.py'))} \
         -- --scene_root {args.output_dir / 'scene.blend'} --output_dir {args.output_dir}"
         run_command(obj_script)
 
@@ -161,7 +121,7 @@ def render(args: RenderArgs):
         exr_script = f"{python_path} {str(current_path / 'utils' / 'openexr_utils.py')} --data_dir {args.output_dir} --output_dir {args.output_dir}/exr_img --batch_size {args.batch_size} --frame_idx {args.frame_idx}" + postfix
         run_command(exr_script)
 
-    if args.end_frame < 64:
+    if args.end_frame < 32 and args.indoor is False and args.use_animal is False:
         if args.export_tracking:
             tracking_script = f"{python_path} {str(current_path / 'export_tracks.py')} --data_root {args.output_dir}" + postfix
             run_command(tracking_script)

@@ -11,6 +11,7 @@ import time
 import sys
 import glob
 import json
+import shutil
 
 FOCAL_LENGTH = 30
 SENSOR_WIDTH = 50
@@ -19,6 +20,169 @@ RESULOUTION_Y = 540
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
+def read_obj_file(obj_file_path):
+    '''
+    Load .obj file, return vertices, faces.
+    return: vertices: N_v X 3, faces: N_f X 3
+    '''
+    obj_f = open(obj_file_path, 'r')
+    lines = obj_f.readlines()
+    vertices = []
+    faces = []
+    vt = []
+    vt_f = []
+    for ori_line in lines:
+        line = ori_line.split()
+        if line[0] == 'v':
+            vertices.append([float(line[1]), float(line[2]), float(line[3])])  # x, y, z
+        elif line[0] == 'f':  # Need to consider / case, // case, etc.
+            faces.append([int(line[1].split('/')[0]),
+                          int(line[2].split('/')[0]),
+                          int(line[3].split('/')[0]) \
+                          ])  # Notice! Need to reverse back when using the face since here it would be clock-wise!
+            # Convert face order from clockwise to counter-clockwise direction.
+            if len(line[1].split('/')) > 1:
+                vt_f.append([int(line[1].split('/')[1]),
+                           int(line[2].split('/')[1]),
+                           int(line[3].split('/')[1]) \
+                           ])
+        elif line[0] == 'vt':
+            vt.append([float(line[1]), float(line[2])])
+        obj_f.close()
+
+    return np.asarray(vertices), np.asarray(faces), np.asarray(vt), np.asarray(vt_f)
+
+def save_obj_file(obj_file_path, vertices, faces, f_idx_offset=0, vt=None, vt_f=None):
+    with open(obj_file_path, 'w') as f:
+        for v in vertices:
+            f.write('v %f %f %f\n' % (v[0], v[1], v[2]))
+        # adding uv coordinates
+        if vt is not None:
+            for v in vt:
+                f.write('vt %f %f\n' % (v[0], v[1]))
+        for i, face in enumerate(faces):
+            if vt_f is not None and i < vt_f.shape[0]:
+                f.write('f %d/%d %d/%d %d/%d\n' % (face[0] + f_idx_offset, vt_f[i][0], face[1] + f_idx_offset, vt_f[i][1], face[2] + f_idx_offset, vt_f[i][2]))
+            else:
+                f.write('f %d %d %d\n' % (face[0] + f_idx_offset, face[1] + f_idx_offset, face[2] + f_idx_offset))
+
+
+def copy_obj(data_root, animal_name, num_seq, save_path):
+    animal_sequences = [p for p in os.listdir(data_root) if animal_name in p]
+    animal_sequences = np.random.choice(animal_sequences, num_seq, replace=False if num_seq < len(animal_sequences) else True)
+
+    os.makedirs(save_path, exist_ok=True)
+
+    idx = 0
+    vt = None
+    vt_f = None
+    for i, animal_sequence in enumerate(animal_sequences):
+        print(animal_sequence)
+        obj_list = [p for p in os.listdir(os.path.join(data_root, animal_sequence, 'mesh_seq')) if '.obj' in p]
+        obj_list = sorted(obj_list)
+        # copy obj from the left to the right timeline
+        if idx == 0:
+            shutil.copy(os.path.join(data_root, animal_sequence, 'mesh_seq', obj_list[0]), os.path.join(save_path, str(idx).zfill(5) + '.obj'))
+            # using blender to unwrap the first obj
+
+            # load obj
+            bpy.ops.import_scene.obj(filepath=os.path.join(save_path, str(idx).zfill(5) + '.obj'),
+                                     use_groups_as_vgroups=True, split_mode='OFF')
+            # select the object
+            imported_object = bpy.context.selected_objects[0]
+            bpy.ops.object.select_all(action='DESELECT')
+            imported_object.select_set(True)
+            bpy.context.view_layer.objects.active = imported_object
+
+            # edit mode
+            bpy.ops.object.mode_set(mode='EDIT')
+            bpy.ops.mesh.select_all(action='SELECT')
+            # smart uv project the entire object
+            bpy.ops.uv.smart_project(angle_limit=66, island_margin=0.02)
+
+            # scale the uv
+
+
+            # finish the edit mode
+            bpy.ops.mesh.select_all(action='DESELECT')
+            bpy.ops.object.mode_set(mode='OBJECT')
+
+            # save the obj
+            bpy.ops.export_scene.obj(filepath=os.path.join(save_path, str(idx).zfill(5) + '.obj'), use_selection=True,
+                                     use_materials=False, use_normals=False, use_uvs=True, use_triangles=False,
+                                     keep_vertex_order=True)
+            # delete the object
+            bpy.ops.object.delete(use_global=False)
+
+            v, f, vt, vt_f = read_obj_file(os.path.join(save_path, str(idx).zfill(5) + '.obj'))
+            # scale vt
+
+            # vt -= 0.5
+            # vt *= 5
+            # vt += 0.5
+
+        for obj in obj_list:
+            v, f, _, _ = read_obj_file(os.path.join(data_root, animal_sequence, 'mesh_seq', obj))
+
+            save_obj_file(os.path.join(save_path, str(idx).zfill(5) + '.obj'), v, f, vt=vt, vt_f=vt_f)
+            idx += 1
+        # copy obj from the right to the left timeline
+        for obj in obj_list[::-1]:
+            v, f, _, _ = read_obj_file(os.path.join(data_root, animal_sequence, 'mesh_seq', obj))
+
+            save_obj_file(os.path.join(save_path, str(idx).zfill(5) + '.obj'), v, f, vt=vt, vt_f=vt_f)
+            idx += 1
+
+        if i < num_seq - 1:
+            # interpolate obj
+            obj_0 = read_obj_file(os.path.join(data_root, animal_sequence, 'mesh_seq', obj_list[0]))
+            obj_list1 = [p for p in os.listdir(os.path.join(data_root, animal_sequences[i+1], 'mesh_seq')) if '.obj' in p]
+            obj_list1 = sorted(obj_list1)
+            obj_1 = read_obj_file(os.path.join(data_root, animal_sequences[i+1], 'mesh_seq', obj_list1[0]))
+
+            for j in range(0, 10):
+                obj_v = (obj_0[0] * (10 - j) + obj_1[0] * j) / 10
+                obj_f = obj_0[1]
+                save_obj_file(os.path.join(save_path, str(idx).zfill(5) + '.obj'), obj_v, obj_f, vt=vt, vt_f=vt_f)
+                idx += 1
+
+def anime2obj(anime_path, save_path):
+    f = open(anime_path, 'rb')
+    nf = np.fromfile(f, dtype=np.int32, count=1)[0]
+    nv = np.fromfile(f, dtype=np.int32, count=1)[0]
+    nt = np.fromfile(f, dtype=np.int32, count=1)[0]
+    vert_data = np.fromfile(f, dtype=np.float32, count=nv * 3)
+    face_data = np.fromfile(f, dtype=np.int32, count=nt * 3)
+    offset_data = np.fromfile(f, dtype=np.float32, count=-1)
+    '''check data consistency'''
+    if len(offset_data) != (nf - 1) * nv * 3:
+        raise ("data inconsistent error!", anime_path)
+    vert_data = vert_data.reshape((-1, 3))
+    face_data = face_data.reshape((-1, 3))
+    offset_data = offset_data.reshape((nf - 1, nv, 3))
+
+    obj_v = vert_data
+    v_list = []
+    for i in range(nf):
+        if i == 0:
+            obj_v = vert_data
+        else:
+            obj_v = vert_data + offset_data[i - 1]
+
+        # check if the obj is under the ground
+        z_min = np.min(obj_v[:, 2])
+        z_max = np.max(obj_v[:, 2])
+        z_diff = z_max - z_min
+        if z_min < -z_diff * 0.2:
+            return
+        v_list.append(obj_v.copy())
+    if not os.path.exists(save_path):
+        os.makedirs(save_path)
+    for i in range(nf):
+        obj_v = v_list[i]
+        obj_f = face_data
+        save_obj_file(os.path.join(save_path, str(i).zfill(5) + '.obj'), obj_v, obj_f, f_idx_offset=1)
+
 class Blender_render:
     def __init__(
         self,
@@ -26,7 +190,6 @@ class Blender_render:
         partnet_path=None,
         GSO_path=None,
         character_path=None,
-        use_character=None,
         motion_path=None,
         camera_path=None,
         render_engine="BLENDER_EEVEE",
@@ -37,7 +200,7 @@ class Blender_render:
         background_hdr_path=None,
         custom_scene=None,
         use_gpu: bool = False,
-        use_indoor_cam: bool = False,
+        indoor: bool = False,
         add_force: bool = False,
         force_step: int = 3,
         force_num: int = 3,
@@ -52,21 +215,36 @@ class Blender_render:
         add_smoke: bool = False,
         material_path: Optional[str] = None,
         scene_scale: Optional[float] = 1.0,
+        use_animal: bool = False,
+        animal_path: Optional[str] = None,
+        animal_name: Optional[str] = None,
     ):
+        self.background_hdr_path = None if background_hdr_path == "None" else background_hdr_path
+        if self.background_hdr_path is not None:
+            hdr_list = os.listdir(self.background_hdr_path)
+            hdr_list = [str(path) for path in Path(self.background_hdr_path).rglob("*") if path.suffix in [".hdr", ".exr"] and (use_animal is False or 'outdoor' in str(path))]
+            self.background_hdr_path = np.random.choice(hdr_list)
+            print(f"Background: {self.background_hdr_path}")
 
-        hdr_list = os.listdir(background_hdr_path)
-        hdr_list = [str(path) for path in Path(background_hdr_path).rglob("*") if path.suffix in [".hdr", ".exr"]]
-        self.background_hdr_path = np.random.choice(hdr_list)
-        print(f"Background: {self.background_hdr_path}")
+        self.scale_factor = scene_scale
+        self.indoor = indoor
+        print(f"Indoor: {self.indoor}")
 
-        if any(s in Path(self.background_hdr_path).parent.name for s in ("indoor", "demo_scene")):
-            use_indoor_cam = True
-            print(f"Using {self.background_hdr_path} which is indoor")
+        if self.indoor is False:
+            if self.background_hdr_path is not None and any(s in Path(self.background_hdr_path).parent.name for s in ("indoor", "demo_scene")):
+                print(f"Using {self.background_hdr_path} which is indoor, setting scale factor by 2")
+                self.scale_factor *= 2
+            else:
+                print(f"Outdoor, setting scale factor by 10")
+                self.scale_factor *= 10
 
+        self.use_animal = use_animal
+        self.animal_path = animal_path
+        self.animal_name = animal_name
         self.blender_scene = bpy.context.scene
         self.render_engine = render_engine
         self.use_gpu = use_gpu
-        self.scale_factor = (10 if not use_indoor_cam else 1) * scene_scale
+        
         self.force_step = force_step
         self.force_num = force_num
         self.force_scale = force_scale
@@ -85,17 +263,20 @@ class Blender_render:
         self.use_denoising = use_denoising  # improves the output quality
         self.samples_per_pixel = samples_per_pixel
 
+        assert self.force_interval > 0
+
         self.set_render_engine()
 
         self.scratch_dir = scratch_dir
         self.GSO_path = GSO_path
         self.partnet_path = partnet_path
         self.character_path = character_path
-        self.use_character = use_character
+        self.use_character = indoor is False
         self.motion_path = motion_path
         self.GSO_path = GSO_path
         self.camera_path = camera_path
         self.motion_path = motion_path
+        self.add_objects = indoor is False
         self.motion_datasets = [d.name for d in Path(motion_path).iterdir() if d.is_dir()]
         self.motion_speed = {"TotalCapture": 1 / 1.5, "DanceDB": 1.0, "CMU": 1.0, "MoSh": 1.0 / 1.2, "SFU": 1.0 / 1.2}
 
@@ -114,13 +295,15 @@ class Blender_render:
         self.obj_set = set(bpy.context.scene.objects)
         self.assets_set = []
         self.gso_force = []
-        self.setup_scene()
+        self.setup_renderer()
+        if self.indoor is False:
+            self.setup_scene()
 
         self.activate_render_passes(normal=True, optical_flow=True, segmentation=True, uv=True)
         self.exr_output_node = self.set_up_exr_output_node()
 
         # self.blender_scene.render.resolution_percentage = 10
-        if background_hdr_path:
+        if self.background_hdr_path is not None:
             print("loading hdr from:", self.background_hdr_path)
             self.load_background_hdr(self.background_hdr_path)
 
@@ -199,6 +382,16 @@ class Blender_render:
 
         print("Loading fog done")
 
+    def setup_renderer(self):
+        # setup scene
+        bpy.context.scene.render.resolution_x = RESULOUTION_X
+        bpy.context.scene.render.resolution_y = RESULOUTION_Y
+        bpy.context.scene.render.resolution_percentage = 100
+        # setup render sampling
+        bpy.context.scene.cycles.samples = self.samples_per_pixel
+        # setup framerate
+        bpy.context.scene.render.fps = self.fps
+
     def setup_scene(self):
         bpy.ops.object.camera_add()
         self.camera = bpy.data.objects["Camera"]
@@ -223,15 +416,6 @@ class Blender_render:
         self.camera.data.lens = FOCAL_LENGTH
         self.camera.data.clip_end = 10000
         self.camera.data.sensor_width = SENSOR_WIDTH
-
-        # setup scene
-        bpy.context.scene.render.resolution_x = RESULOUTION_X
-        bpy.context.scene.render.resolution_y = RESULOUTION_Y
-        bpy.context.scene.render.resolution_percentage = 100
-        # setup render sampling
-        bpy.context.scene.cycles.samples = self.samples_per_pixel
-        # setup framerate
-        bpy.context.scene.render.fps = self.fps
 
         print(f"Setting up scene with {self.samples_per_pixel} samples per pixel")
         print(f"Setting up scene with {self.fps} fps")
@@ -262,7 +446,9 @@ class Blender_render:
         # bpy.context.scene.gravity = (0, 0, 0)
 
         # load assets
+        print(f"Loading assets...")
         self.load_assets()
+        print(f"Finished loading assets...")
 
     def set_cam(self, cam_loc, point):
         self.camera.location = self.cam_loc
@@ -281,38 +467,48 @@ class Blender_render:
 
         # append materials
         # Right now this only contains a cube which we don't want
-        # bpy.ops.wm.append(directory=os.path.join(self.material_path, "Object"), filename="Material")
+        bpy.ops.wm.append(directory=os.path.join(self.material_path, "Object"), filename="Material")
 
         # randomize floor material
         if "Floor" in bpy.data.collections:
             floor_collection = bpy.data.collections["Floor"]
             floor_materials = [m for m in bpy.data.materials if "floor" in m.name or "Floor" in m.name]
-            for obj in floor_collection.objects:
-                if len(obj.data.materials) == 0:
-                    # create a new material
-                    obj.data.materials.append(np.random.choice(floor_materials))
-                else:
-                    obj.data.materials[0] = np.random.choice(floor_materials)
+            if len(floor_materials) == 0:
+                print("No floor material found")
+            else:
+                for obj in floor_collection.objects:
+                    if len(obj.data.materials) == 0:
+                        # create a new material
+                        obj.data.materials.append(np.random.choice(floor_materials))
+                    else:
+                        obj.data.materials[0] = np.random.choice(floor_materials)
 
         # randomize wall material
         if "Wall" in bpy.data.collections:
             wall_collection = bpy.data.collections["Wall"]
             wall_materials = [m for m in bpy.data.materials if "wall" in m.name or "Wall" in m.name]
-            # randomize each 2 walls with the same material
-            for i in range(0, len(wall_collection.objects), 2):
-                wall_material = np.random.choice(wall_materials)
-                for j in range(2):
-                    if i + j < len(wall_collection.objects):
-                        wall_collection.objects[i + j].data.materials.append(wall_material)
-                        wall_collection.objects[i + j].data.materials[0] = wall_material
+
+            if len(wall_materials) == 0:
+                print("No wall material found")
+            else:
+                # randomize each 2 walls with the same material
+                for i in range(0, len(wall_collection.objects), 2):
+                    wall_material = np.random.choice(wall_materials)
+                    for j in range(2):
+                        if i + j < len(wall_collection.objects):
+                            wall_collection.objects[i + j].data.materials.append(wall_material)
+                            wall_collection.objects[i + j].data.materials[0] = wall_material
 
         # randomize ceiling material
         if "Ceiling" in bpy.data.collections:
             ceiling_collection = bpy.data.collections["Ceiling"]
             ceiling_materials = [m for m in bpy.data.materials if "ceiling" in m.name or "Ceiling" in m.name]
-            for obj in ceiling_collection.objects:
-                obj.data.materials.append(np.random.choice(ceiling_materials))
-                obj.data.materials[0] = np.random.choice(ceiling_materials)
+            if len(ceiling_materials) == 0:
+                print("No ceiling material found")
+            else:
+                for obj in ceiling_collection.objects:
+                    obj.data.materials.append(np.random.choice(ceiling_materials))
+                    obj.data.materials[0] = np.random.choice(ceiling_materials)
 
         print("Scene randomized")
 
@@ -353,11 +549,81 @@ class Blender_render:
             if segmentation:
                 aux_view_layer.cycles.pass_crypto_depth = 2
 
-    def load_assets(self):
+    def load_animal(self):
+        # load animal
+        animal_list = os.listdir(self.animal_path)
+        if self.animal_name is None:
+            animal = np.random.choice(animal_list)
+            self.animal_name = animal.split('_')[0]
+        animal_list = [c for c in animal_list if self.animal_name in c]
+        # sort animal_list by file size
+
+        animal_list = sorted(animal_list, key=lambda x: os.path.getsize(os.path.join(self.animal_path, x)))[:50]
+        print(animal_list, self.animal_name)
+        animal_list = np.random.choice(animal_list, 30, replace=False if len(animal_list) > 30 else True)
+
+        print(f"Saving to {os.path.join(self.scratch_dir, 'tmp')}")
+
+        animal_obj_savedir = Path(self.scratch_dir) / 'tmp'
+        animal_obj_savedir.mkdir(parents=True, exist_ok=True)
+        animal_obj_savedir = str(animal_obj_savedir)
+        for animal_seq in animal_list:
+            anime2obj(os.path.join(self.animal_path, animal_seq, animal_seq + '.anime'), os.path.join(animal_obj_savedir, animal_seq, 'mesh_seq'))
+        copy_obj(animal_obj_savedir, self.animal_name, 15, os.path.join(self.scratch_dir, 'tmp', 'animal_obj'))
+
+        # set the end frame according to the number of frames in the sequence
+        bpy.context.scene.frame_end = len(os.listdir(os.path.join(self.scratch_dir, 'tmp', 'animal_obj')))
+
+        # load mesh sequence
+        seq_imp_settings = bpy.types.PropertyGroup.bl_rna_get_subclass_py("SequenceImportSettings")
+        seq_imp_settings.fileNamePrefix = bpy.props.StringProperty(name='File Name', default='0')
+        print('importing mesh sequence')
+        bpy.ops.ms.import_sequence(directory=os.path.join(self.scratch_dir, 'tmp', 'animal_obj'))
+        print('importing mesh sequence done!')
+        self.animal = bpy.context.selected_objects[0]
+        # scale and rotate the animal
+        dimension = np.max(self.animal.dimensions)
+        animal_scale = np.random.uniform(1, 1.4) * self.scale_factor * np.random.uniform(1.5, 2) / dimension
+        self.animal.scale = (animal_scale, animal_scale, animal_scale)
+        self.animal.rotation_euler = (0, 0, 0)
+
+        # make the animal stand on the ground without penetrating
+        z_min = np.min([b[2] for b in self.animal.bound_box], axis=0)
+        self.animal.location = (0, 0, -z_min * animal_scale)
+
+        bpy.ops.object.transform_apply(location=True, rotation=False, scale=False)
+
+        # add random texture to animal
+        print('adding texture')
+        # append materials
+
+        # Tmp disable cube
+        bpy.ops.wm.append(directory=os.path.join(self.material_path, "Object"), filename="Cube")
+
+        try:
+            furry_material = [f for f in bpy.data.materials if 'Animal' in f.name]
+            furry_material = np.random.choice(furry_material)
+
+            self.animal.data.materials.clear()
+            self.animal.data.materials.append(furry_material)
+        except:
+            print("No furry material found")
+
+        # add physics
+        bpy.context.view_layer.objects.active = self.animal
+        bpy.ops.rigidbody.object_add()
+        self.animal.rigid_body.collision_shape = 'MESH'
+        self.animal.rigid_body.type = 'PASSIVE'
+        # enable animated
+        self.animal.rigid_body.kinematic = True
+
+        print(f"Animal loaded")
+
+    def load_character(self):
         # load character
         character_list = os.listdir(self.character_path)
         character_list = [c for c in character_list if os.path.isdir(os.path.join(self.character_path, c))]
-        character = np.random.choice(character_list) if self.use_character is None else self.use_character
+        character = np.random.choice(character_list)
         self.character_name = character
         character_collection_path = os.path.join(self.character_path, character, "{}.blend".format(character), "Collection")
 
@@ -380,19 +646,29 @@ class Blender_render:
         for obj in character_collection.objects:
             obj.select_set(True)
 
-        # add scale
-        bpy.ops.transform.resize(
-            value=(self.scale_factor * 1.2, self.scale_factor * 1.2, self.scale_factor * 1.2),
-            orient_type="GLOBAL",
-            orient_matrix=((1, 0, 0), (0, 1, 0), (0, 0, 1)),
-            orient_matrix_type="GLOBAL",
-            mirror=False,
-            use_proportional_edit=False,
-            proportional_edit_falloff="SMOOTH",
-            proportional_size=1,
-            use_proportional_connected=False,
-            use_proportional_projected=False,
-        )
+
+
+    def load_assets(self):
+        if self.use_animal:
+            self.load_animal()
+
+        elif self.use_character:
+            self.load_character()
+
+        if self.indoor is False:
+            # add scale
+            bpy.ops.transform.resize(
+                value=(self.scale_factor * 1.2, self.scale_factor * 1.2, self.scale_factor * 1.2),
+                orient_type="GLOBAL",
+                orient_matrix=((1, 0, 0), (0, 1, 0), (0, 0, 1)),
+                orient_matrix_type="GLOBAL",
+                mirror=False,
+                use_proportional_edit=False,
+                proportional_edit_falloff="SMOOTH",
+                proportional_size=1,
+                use_proportional_connected=False,
+                use_proportional_projected=False,
+            )
 
         if self.add_smoke:
             # add a cube
@@ -422,117 +698,118 @@ class Blender_render:
             bpy.context.object.modifiers["Fluid"].domain_settings.cache_frame_start = 1
             bpy.context.object.modifiers["Fluid"].domain_settings.cache_frame_end = bpy.context.scene.frame_end
 
-        # add objects
-        GSO_assets = os.listdir(self.GSO_path)
-        GSO_assets = [os.path.join(self.GSO_path, asset) for asset in GSO_assets]
-        GSO_assets = [asset for asset in GSO_assets if os.path.isdir(asset)]
-        GSO_assets_path = np.random.choice(GSO_assets, size=self.num_assets // 2, replace=False)
-        print(GSO_assets_path, self.GSO_path)
+        if self.add_objects:
+            # add objects
+            GSO_assets = os.listdir(self.GSO_path)
+            GSO_assets = [os.path.join(self.GSO_path, asset) for asset in GSO_assets]
+            GSO_assets = [asset for asset in GSO_assets if os.path.isdir(asset)]
+            GSO_assets_path = np.random.choice(GSO_assets, size=self.num_assets // 2, replace=False)
+            print(GSO_assets_path, self.GSO_path)
 
-        partnet_assets = os.listdir(self.partnet_path)
-        partnet_assets = [os.path.join(self.partnet_path, asset) for asset in partnet_assets]
-        partnet_assets = [asset for asset in partnet_assets if os.path.isdir(asset) and len(os.listdir(os.path.join(asset, "objs"))) < 15]
-        partnet_assets = np.random.choice(partnet_assets, size=self.num_assets - len(GSO_assets_path), replace=False)
+            partnet_assets = os.listdir(self.partnet_path)
+            partnet_assets = [os.path.join(self.partnet_path, asset) for asset in partnet_assets]
+            partnet_assets = [asset for asset in partnet_assets if os.path.isdir(asset) and len(os.listdir(os.path.join(asset, "objs"))) < 15]
+            partnet_assets = np.random.choice(partnet_assets, size=self.num_assets - len(GSO_assets_path), replace=False)
 
-        # generating location lists for assets, and remove the center area
-        location_list = np.random.uniform(np.array([-2.5, -2.5, 0.8]), np.array([-1, -1, 2]), size=(self.num_assets * 50, 3)) * self.scale_factor
-        location_list = location_list * np.sign(np.random.uniform(-1, 1, size=(self.num_assets * 50, 3)))
-        location_list[:, 2] = np.abs(location_list[:, 2])
-        location_list = self.farthest_point_sampling(location_list, self.num_assets + 1)
-        for i, asset_path in enumerate(GSO_assets_path):
-            bpy.ops.import_scene.obj(filepath=os.path.join(asset_path, "meshes", "model.obj"))
-            imported_object = bpy.context.selected_objects[0]
-            self.assets_set.append(imported_object)
-            self.load_asset_texture(
-                imported_object,
-                mat_name=imported_object.data.name + "mat",
-                texture_path=os.path.join(asset_path, "materials", "textures", "texture.png"),
-            )
-            bpy.ops.object.origin_set(type="ORIGIN_GEOMETRY", center="BOUNDS")
-            # randomize location and translation
-            imported_object.location = location_list[i]
-            imported_object.rotation_euler = (np.random.uniform(0, 2 * np.pi), np.random.uniform(0, 2 * np.pi), np.random.uniform(0, 2 * np.pi))
-
-            # set scale
-            dimension = np.max(imported_object.dimensions)
-            scale = np.random.uniform(1, 6) * self.scale_factor
-            if scale * dimension > 0.8 * self.scale_factor:  # max 0.8m
-                scale = 0.8 * self.scale_factor / dimension
-            elif scale * dimension < 0.1 * self.scale_factor:
-                scale = 0.1 * self.scale_factor / dimension
-            imported_object.scale = (scale, scale, scale)
-            bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
-
-            # set obj active
-            bpy.context.view_layer.objects.active = imported_object
-            # add rigid body
-            bpy.ops.rigidbody.object_add()
-            imported_object.rigid_body.type = "ACTIVE"
-            # imported_object.rigid_body.collision_shape = 'MESH'
-            imported_object.rigid_body.collision_shape = "CONVEX_HULL"
-
-            imported_object.rigid_body.mass = 0.5 * scale / self.scale_factor
-            # bpy.ops.object.modifier_add(type='COLLISION')
-        print("GSO assets loaded")
-        print("loading partnet assets")
-        print(partnet_assets)
-        for j, obj_path in enumerate(partnet_assets):
-            parts = os.listdir(os.path.join(obj_path, "objs"))
-            part_objs = []
-            for p in parts:
-                if not "obj" in p:
-                    continue
-                bpy.ops.import_scene.obj(filepath=os.path.join(obj_path, "objs", p))
+            # generating location lists for assets, and remove the center area
+            location_list = np.random.uniform(np.array([-2.5, -2.5, 0.8]), np.array([-1, -1, 2]), size=(self.num_assets * 50, 3)) * self.scale_factor
+            location_list = location_list * np.sign(np.random.uniform(-1, 1, size=(self.num_assets * 50, 3)))
+            location_list[:, 2] = np.abs(location_list[:, 2])
+            location_list = self.farthest_point_sampling(location_list, self.num_assets + 1)
+            for i, asset_path in enumerate(GSO_assets_path):
+                bpy.ops.import_scene.obj(filepath=os.path.join(asset_path, "meshes", "model.obj"))
                 imported_object = bpy.context.selected_objects[0]
-                part_objs.append(imported_object)
-
-                # unwrap obj
-                bpy.ops.object.select_all(action="DESELECT")
-                imported_object.select_set(True)
-                bpy.context.view_layer.objects.active = imported_object
-                bpy.ops.object.mode_set(mode="EDIT")
-                bpy.ops.mesh.select_all(action="SELECT")
-                # smart uv project the entire object
-                bpy.ops.uv.smart_project(angle_limit=66, island_margin=0.02)
-                # finish the edit mode
-                bpy.ops.mesh.select_all(action="DESELECT")
-                bpy.ops.object.mode_set(mode="OBJECT")
-
-                # load random texture from gso
-                gso_random_index = np.random.choice(range(len(GSO_assets)))
+                self.assets_set.append(imported_object)
                 self.load_asset_texture(
                     imported_object,
                     mat_name=imported_object.data.name + "mat",
-                    texture_path=os.path.join(GSO_assets[gso_random_index], "materials", "textures", "texture.png"),
+                    texture_path=os.path.join(asset_path, "materials", "textures", "texture.png"),
                 )
-            # merge parts into one obj
-            bpy.ops.object.select_all(action="DESELECT")
-            for part in part_objs:
-                part.select_set(True)
-            bpy.ops.object.join()
-            imported_object = bpy.context.selected_objects[0]
-            # randomize location and translation
-            imported_object.location = location_list[len(GSO_assets_path) + j]
-            imported_object.rotation_euler = (np.random.uniform(0, 2 * np.pi), np.random.uniform(0, 2 * np.pi), np.random.uniform(0, 2 * np.pi))
-            # random scale
-            dimension = np.max(imported_object.dimensions)
-            scale = np.random.uniform(1, 6) * self.scale_factor
-            if scale * dimension > 0.8 * self.scale_factor:
-                scale = 0.8 * self.scale_factor / dimension
-            elif scale * dimension < 0.1 * self.scale_factor:
-                scale = 0.1 * self.scale_factor / dimension
-            imported_object.scale = (scale, scale, scale)
-            bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
-            bpy.ops.object.origin_set(type="ORIGIN_GEOMETRY", center="BOUNDS")
+                bpy.ops.object.origin_set(type="ORIGIN_GEOMETRY", center="BOUNDS")
+                # randomize location and translation
+                imported_object.location = location_list[i]
+                imported_object.rotation_euler = (np.random.uniform(0, 2 * np.pi), np.random.uniform(0, 2 * np.pi), np.random.uniform(0, 2 * np.pi))
 
-            # set obj active
-            bpy.context.view_layer.objects.active = imported_object
-            # add rigid body
-            bpy.ops.rigidbody.object_add()
-            imported_object.rigid_body.type = "ACTIVE"
-            imported_object.rigid_body.collision_shape = "CONVEX_HULL"
-            imported_object.rigid_body.mass = 1 * scale / self.scale_factor
-            self.assets_set.append(imported_object)
+                # set scale
+                dimension = np.max(imported_object.dimensions)
+                scale = np.random.uniform(1, 6) * self.scale_factor
+                if scale * dimension > 0.8 * self.scale_factor:  # max 0.8m
+                    scale = 0.8 * self.scale_factor / dimension
+                elif scale * dimension < 0.1 * self.scale_factor:
+                    scale = 0.1 * self.scale_factor / dimension
+                imported_object.scale = (scale, scale, scale)
+                bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+
+                # set obj active
+                bpy.context.view_layer.objects.active = imported_object
+                # add rigid body
+                bpy.ops.rigidbody.object_add()
+                imported_object.rigid_body.type = "ACTIVE"
+                # imported_object.rigid_body.collision_shape = 'MESH'
+                imported_object.rigid_body.collision_shape = "CONVEX_HULL"
+
+                imported_object.rigid_body.mass = 0.5 * scale / self.scale_factor
+                # bpy.ops.object.modifier_add(type='COLLISION')
+            print("GSO assets loaded")
+            print("loading partnet assets")
+            print(partnet_assets)
+            for j, obj_path in enumerate(partnet_assets):
+                parts = os.listdir(os.path.join(obj_path, "objs"))
+                part_objs = []
+                for p in parts:
+                    if not "obj" in p:
+                        continue
+                    bpy.ops.import_scene.obj(filepath=os.path.join(obj_path, "objs", p))
+                    imported_object = bpy.context.selected_objects[0]
+                    part_objs.append(imported_object)
+
+                    # unwrap obj
+                    bpy.ops.object.select_all(action="DESELECT")
+                    imported_object.select_set(True)
+                    bpy.context.view_layer.objects.active = imported_object
+                    bpy.ops.object.mode_set(mode="EDIT")
+                    bpy.ops.mesh.select_all(action="SELECT")
+                    # smart uv project the entire object
+                    bpy.ops.uv.smart_project(angle_limit=66, island_margin=0.02)
+                    # finish the edit mode
+                    bpy.ops.mesh.select_all(action="DESELECT")
+                    bpy.ops.object.mode_set(mode="OBJECT")
+
+                    # load random texture from gso
+                    gso_random_index = np.random.choice(range(len(GSO_assets)))
+                    self.load_asset_texture(
+                        imported_object,
+                        mat_name=imported_object.data.name + "mat",
+                        texture_path=os.path.join(GSO_assets[gso_random_index], "materials", "textures", "texture.png"),
+                    )
+                # merge parts into one obj
+                bpy.ops.object.select_all(action="DESELECT")
+                for part in part_objs:
+                    part.select_set(True)
+                bpy.ops.object.join()
+                imported_object = bpy.context.selected_objects[0]
+                # randomize location and translation
+                imported_object.location = location_list[len(GSO_assets_path) + j]
+                imported_object.rotation_euler = (np.random.uniform(0, 2 * np.pi), np.random.uniform(0, 2 * np.pi), np.random.uniform(0, 2 * np.pi))
+                # random scale
+                dimension = np.max(imported_object.dimensions)
+                scale = np.random.uniform(1, 6) * self.scale_factor
+                if scale * dimension > 0.8 * self.scale_factor:
+                    scale = 0.8 * self.scale_factor / dimension
+                elif scale * dimension < 0.1 * self.scale_factor:
+                    scale = 0.1 * self.scale_factor / dimension
+                imported_object.scale = (scale, scale, scale)
+                bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+                bpy.ops.object.origin_set(type="ORIGIN_GEOMETRY", center="BOUNDS")
+
+                # set obj active
+                bpy.context.view_layer.objects.active = imported_object
+                # add rigid body
+                bpy.ops.rigidbody.object_add()
+                imported_object.rigid_body.type = "ACTIVE"
+                imported_object.rigid_body.collision_shape = "CONVEX_HULL"
+                imported_object.rigid_body.mass = 1 * scale / self.scale_factor
+                self.assets_set.append(imported_object)
 
         # add force
         if self.add_force:
@@ -923,24 +1200,28 @@ class Blender_render:
         """Renders all frames (or a subset) of the animation.
         """
         print("Using scratch rendering folder: '%s'" % self.scratch_dir)
-        # setup rigid world cache
-        bpy.context.scene.rigidbody_world.point_cache.frame_start = 1
-        bpy.context.scene.rigidbody_world.point_cache.frame_end = bpy.context.scene.frame_end + 1
-        bpy.context.view_layer.objects.active = self.assets_set[0]
+
+        if self.indoor is False:
+            # setup rigid world cache
+            bpy.context.scene.rigidbody_world.point_cache.frame_start = 1
+            bpy.context.scene.rigidbody_world.point_cache.frame_end = bpy.context.scene.frame_end + 1
+            bpy.context.view_layer.objects.active = self.assets_set[0]
 
         self.set_render_engine()
         self.clear_scene()
 
         absolute_path = os.path.abspath(self.scratch_dir)
-
         frames = range(bpy.context.scene.frame_start, bpy.context.scene.frame_end + 1)
 
         # add forces
         for frame_nr in frames:
-            if frame_nr % self.force_interval == 1 and self.add_force:
+            if self.add_force and frame_nr % self.force_interval == 1:
                 # add keyframe to force strength
                 bpy.context.scene.frame_set(frame_nr)
-                force_loc_list = np.random.uniform(np.array([-4, -4, -5]), np.array([4, 4, -3]), size=(self.num_assets * 50, 3)) * self.scale_factor
+                if self.use_animal:
+                    force_loc_list = np.random.uniform(np.array([-16, -16, -3]), np.array([16, 16, 0]), size=(self.num_assets * 50, 3)) * self.scale_factor
+                else:
+                    force_loc_list = np.random.uniform(np.array([-4, -4, -5]), np.array([4, 4, -3]), size=(self.num_assets * 50, 3)) * self.scale_factor
                 force_loc_list = self.farthest_point_sampling(force_loc_list, self.force_num)
                 print("force_loc_list", force_loc_list)
                 for i in range(len(self.gso_force)):
@@ -965,21 +1246,23 @@ class Blender_render:
 
         # bpy.ops.wm.save_as_mainfile(filepath=os.path.join(absolute_path, 'scene1.blend'))
         # bake rigid body simulation
+        if self.indoor is False:
+            bpy.ops.object.select_all(action="SELECT")
+            bpy.context.view_layer.objects.active = self.assets_set[0]
+            print("start baking")
+            self.bake_to_keyframes(frames[0], frames[-1], 1)
+            print("baking done")
+            camdata = self.camera.data
+        else:
+            camdata = bpy.context.scene.camera.data
 
-        bpy.ops.object.select_all(action="SELECT")
-        bpy.context.view_layer.objects.active = self.assets_set[0]
-        print("start baking")
-        self.bake_to_keyframes(frames[0], frames[-1], 1)
-        print("baking done")
         bpy.ops.wm.save_as_mainfile(filepath=os.path.join(absolute_path, "scene.blend"))
 
-        camdata = self.camera.data
         focal = camdata.lens  # mm
         sensor_width = camdata.sensor_width  # mm
         sensor_height = camdata.sensor_height  # mm
         scene_info = {"sensor_width": sensor_width, "sensor_height": sensor_height, "focal_length": focal, "assets": ["background"], "fps": bpy.context.scene.render.fps}
         scene_info["assets"] += [x.data.name for x in self.assets_set]
-        scene_info["character"] = self.character_name
         json.dump(scene_info, open(os.path.join(self.scratch_dir, "scene_info.json"), "w"))
 
         use_multiview = self.views > 1
@@ -992,16 +1275,18 @@ class Blender_render:
             obj_save_dir = os.path.join(self.scratch_dir, "obj")
             os.makedirs(camera_save_dir, exist_ok=True)
             os.makedirs(obj_save_dir, exist_ok=True)
-            # set camera poses from real camera trajectory
-            camera_files = glob.glob(os.path.join(self.camera_path, "*/*.txt"))
-            # filter out small files
-            camera_files = [c for c in camera_files if os.path.getsize(c) > 5000]
-            camera_file = np.random.choice(camera_files)
-            print("camera file: ", camera_file)
-            camera_rt = np.loadtxt(camera_file, skiprows=1)[:, 7:].reshape(-1, 3, 4)
-            self.bake_camera(camera_rt, frames)
 
-            bpy.ops.wm.save_as_mainfile(filepath=os.path.join(absolute_path, "scene.blend"))
+            if self.indoor is False:
+                # set camera poses from real camera trajectory
+                camera_files = glob.glob(os.path.join(self.camera_path, "*/*.txt"))
+                # filter out small files
+                camera_files = [c for c in camera_files if os.path.getsize(c) > 5000]
+                camera_file = np.random.choice(camera_files)
+                print("camera file: ", camera_file)
+                camera_rt = np.loadtxt(camera_file, skiprows=1)[:, 7:].reshape(-1, 3, 4)
+                self.bake_camera(camera_rt, frames)
+                bpy.ops.wm.save_as_mainfile(filepath=os.path.join(absolute_path, "scene.blend"))
+
             for frame_nr in frames:
                 bpy.context.scene.frame_set(frame_nr)
 
@@ -1016,6 +1301,7 @@ class Blender_render:
                 np.savetxt(os.path.join(camera_save_dir, f"K_{frame_nr:04d}.txt"), K)
                 print("Rendered frame '%s'" % bpy.context.scene.render.filepath)
         else:
+            assert self.indoor is False
             # set camera poses from real camera trajectory
             camera_files = glob.glob(os.path.join(self.camera_path, "*/*.txt"))
             # filter out small files
@@ -1140,12 +1426,11 @@ if __name__ == "__main__":
     print("argsv:{0}".format(argv))
     parser = argparse.ArgumentParser(description="Render Motion in 3D Environment for HuMoR Generation.")
     parser.add_argument("--character_root", type=str, metavar="PATH", default="./data/robots/")
-    parser.add_argument("--use_character", type=str, metavar="PATH", default=None)
     parser.add_argument("--camera_root", type=str, metavar="PATH", default="./data/camera_trajectory/MannequinChallenge")
     parser.add_argument("--motion_root", type=str, metavar="PATH", default="./data/motions/")
     parser.add_argument("--partnet_root", type=str, metavar="PATH", default="./data/partnet/")
     parser.add_argument("--gso_root", type=str, metavar="PATH", default="./data/GSO/")
-    parser.add_argument("--background_hdr_path", type=str, default="./data/hdri/")
+    parser.add_argument("--background_hdr_path", type=str, default=None)
     parser.add_argument("--scene_root", type=str, default="./data/blender_assets/hdri.blend")
     parser.add_argument("--output_dir", type=str, metavar="PATH", default="./", help="img save dir")
     parser.add_argument("--output_name", type=str, metavar="PATH", help="img save name", default="test")
@@ -1169,6 +1454,9 @@ if __name__ == "__main__":
     parser.add_argument("--material_path", type=str, default=None)
     parser.add_argument("--scene_scale", type=float, default=1.0)
     parser.add_argument("--force_scale", type=float, default=1.0)
+    parser.add_argument("--use_animal", action="store_true", default=False)
+    parser.add_argument("--animal_path", type=str, default=None)
+    parser.add_argument("--animal_name", type=str, default=None)
     args = parser.parse_args(argv)
     print("args:{0}".format(args))
     ## Load the world
@@ -1189,9 +1477,8 @@ if __name__ == "__main__":
         GSO_path=args.gso_root,
         num_assets=args.num_assets,
         custom_scene=args.scene_root,
-        use_indoor_cam=args.indoor,
+        indoor=args.indoor,
         partnet_path=args.partnet_root,
-        use_character=args.use_character,
         add_force=args.add_force,
         force_step=args.force_step,
         force_interval=args.force_interval,
@@ -1206,6 +1493,9 @@ if __name__ == "__main__":
         material_path=args.material_path,
         scene_scale=args.scene_scale,
         force_scale=args.force_scale,
+        use_animal=args.use_animal,
+        animal_path=args.animal_path,
+        animal_name=args.animal_name,
     )
 
     renderer.render()

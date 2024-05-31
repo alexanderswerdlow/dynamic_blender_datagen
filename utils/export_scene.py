@@ -20,8 +20,6 @@ parser.add_argument('--output_dir', type=str, metavar='PATH', default='',
                     help='obj save dir')
 parser.add_argument('--export_character', type=bool, default=True)
 parser.add_argument('--start_frame', type=int, default=None)
-parser.add_argument('--end_frame', type=int, default=None)
-parser.add_argument('--skip_n', type=int, default=1)
 args = parser.parse_args(argv)
 print("args:{0}".format(args))
 
@@ -36,7 +34,7 @@ for collection_name in collection_set:
     assets_keys += [obj.name for obj in collection.objects if obj.type == 'MESH' and not obj.hide_render and not 'Fire' in obj.name and not 'Smoke' in obj.name]
 
 scene_info = json.load(open(os.path.join(args.output_dir, 'scene_info.json'), 'r'))
-scene_info['assets'] = ['background'] + assets_keys
+scene_info['assets'] = ['background', "character"] + assets_keys
 scene_info['character'] = [s for s in bpy.data.collections.keys() if s not in collection_set and s not in ['Camera', 'Light', 'fog', 'Fog']]
 obj_save_dir = os.path.join(args.output_dir, 'obj')
 if not os.path.exists(obj_save_dir):
@@ -67,12 +65,7 @@ if args.export_character:
             obj.select_set(True)
             character_set.append(obj.name)
 
-    if args.start_frame is not None and args.end_frame is not None:
-        frames = range(args.start_frame, args.end_frame + 1)
-        assert frames[0] == bpy.context.scene.frame_start
-        assert frames[-1] <= bpy.context.scene.frame_end + 1
-    else:
-        frames = range(bpy.context.scene.frame_start, bpy.context.scene.frame_end + 1)
+    frames = range(bpy.context.scene.frame_start, bpy.context.scene.frame_end + 1)
     for frame_nr in frames:
         bpy.context.scene.frame_set(frame_nr * args.skip_n)
         bpy.ops.export_scene.obj(filepath=os.path.join(obj_save_dir, f'character_{frame_nr:04d}.obj'),

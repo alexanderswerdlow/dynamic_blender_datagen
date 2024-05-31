@@ -112,9 +112,7 @@ def train(
     print(result)
 
     if mode is None:
-        import random
-
-        mode_probabilities = {"indoor": 0.0, "robot": 0.0, "outdoor": 1.00}
+        mode_probabilities = {"default": 1.0, "animal": 0.0}
 
         modes = list(mode_probabilities.keys())
         probabilities = list(mode_probabilities.values())
@@ -137,28 +135,48 @@ def train(
     if local is False:
         args.use_singularity = True
 
-    if mode == "indoor":
-        args.add_fog = True
-        args.randomize = True
-        args.add_force = True
-    elif mode == "outdoor":
-        args.end_frame = random_choice([32, 64, 128, 256, 384], [0.2, 0.2, 0.2, 0.2, 0.2]) if end_frame is None else end_frame
+    scene_dir = DATA_DIR / "scenes"
+
+    if mode == "default":
+        args.end_frame = random_choice([32, 64, 128, 256, 384], [0.2, 0.4, 0.5, 0.3, 0.1]) if end_frame is None else end_frame
         args.type = "human"
         args.add_smoke = False
         args.add_fog = False
-        args.num_assets = random_choice([2, 5, 8, 10, 12, 15], [0.1, 0.2, 0.5, 0.5, 0.2, 0.1])
+        args.num_assets = random_choice([2, 5, 8, 10, 12, 15, 20, 25, 30], [0.1, 0.2, 0.5, 0.5, 0.5, 0.7, 0.5, 0.3, 0.3])
         args.add_force = random_choice([True, False], [0.5, 0.5])
-        args.force_interval = random_choice(
+        args.force_interval = max(random_choice(
             [args.end_frame // 1, args.end_frame // 2, args.end_frame // 4, args.end_frame // 8, args.end_frame // 16], [0.3, 0.5, 0.5, 0.3, 0.05]
-        )
+        ), 1)
         args.force_step = random_choice([1, 2, 3, 4, 5], [0.6, 0.3, 0.2, 0.05, 0.05])
         args.force_scale = random_choice([0.05, 0.1, 0.25, 0.4, 0.6, 1.0], [0.1, 0.2, 0.3, 0.4, 0.4, 0.3])
-        args.randomize = True
-        args.scene_root = DATA_DIR / random_choice(["blender_assets/hdri_plane.blend", "demo_scene/robot.blend"], [1.0, 0.01])
         args.fps = random_choice([2, 5, 10, 15, 30], [0.1, 0.2, 0.2, 0.2, 0.1])
-    elif mode == "animal":
-        args.type = "animal"
+
+        blend_files = list(scene_dir.glob("*.blend"))
+        blend_files.append(DATA_DIR / "blender_assets/hdri_plane.blend")
+        blend_files.append(DATA_DIR / "demo_scene/robot.blend")
+        weights = [1] * len(blend_files)
+        weights[0] = len(blend_files) // 3
+        args.scene_root = random.choices(blend_files, weights)[0]
+        args.use_animal = random_choice([True, False], [0.25, 0.75])
+
+    if mode == "animal":
+        args.use_animal = True
+
+    if args.use_animal:
+        args.scene_root = DATA_DIR / "blender_assets" / "hdri_plane.blend"
         args.material_path = DATA_DIR / "blender_assets" / "animal_material.blend"
+        args.add_smoke = False
+
+    is_indoor = any(s in str(args.scene_root) for s in ("blender_assets", )) is False
+
+    if is_indoor:
+        print("Setting indoor")
+        args.indoor = True
+        args.randomize = True
+        args.num_assets = max(args.num_assets, 10)
+        args.force_interval = max(args.force_interval, args.end_frame // 4)
+        args.background_hdr_path = None
+        args.add_force = False
 
     if fast:
         args.samples_per_pixel = 4
@@ -242,10 +260,10 @@ def run_slurm(data_path, num_chunks, num_workers, partition, exclude: bool = Fal
 
     print(kwargs)
     slurm = Slurm(
-        "--requeue=10",
+        "--requeue=4",
         job_name=f"blender_{data_path.name}",
         cpus_per_task=4,
-        mem="20g",
+        mem="16g",
         export="ALL",
         gres=["gpu:1"],
         output=f"outputs/{Slurm.JOB_ARRAY_MASTER_ID}_{Slurm.JOB_ARRAY_ID}_{Slurm.JOB_ID}.out",
@@ -282,6 +300,7 @@ def main(
     local: bool = False,
     fast: bool = False,
     end_frame: Optional[int] = None,
+    mode: Optional[str] = None,
 ):
     if use_slurm:
         run_slurm(data_path, num_to_process, num_workers, partition, end_frame=end_frame)
@@ -293,11 +312,11 @@ def main(
             train(
                 data_path=data_path,
                 slurm_task_index=0,
-                mode="outdoor",
                 local=local,
                 existing_output_dir=existing_output_dir,
                 fast=fast,
                 end_frame=end_frame,
+                mode=mode
             )
 
 

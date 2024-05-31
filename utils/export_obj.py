@@ -32,18 +32,27 @@ assets_keys = [
     if bpy.data.objects[key].type == "MESH" and key != "Plane" and "Smoke" not in key and not bpy.data.objects[key].hide_render
 ]
 scene_info = json.load(open(os.path.join(args.output_dir, "scene_info.json"), "r"))
+
 scene_info["assets"] = ["background"] + assets_keys
 obj_save_dir = os.path.join(args.output_dir, "obj")
 if not os.path.exists(obj_save_dir):
     os.makedirs(obj_save_dir)
+
 print("assets_keys", assets_keys)
+map_chars = {"/": "__", " ": "_"}
+
+def sanitize_filename(filename: str) -> str:
+    return "".join(map_chars.get(c, c) for c in filename if c.isalnum() or map_chars.get(c, c) in (" ", "_", "-", "__"))
+
+valid_assets_keys = [sanitize_filename(key) for key in assets_keys]
+print("valid_assets_keys", valid_assets_keys)
+
 for frame_nr in frames:
     bpy.context.scene.frame_set(frame_nr)
-    for asset in assets_keys:
+    for valid_asset, asset in zip(valid_assets_keys, assets_keys):
         bpy.data.objects[asset].select_set(True)
-        save_asset_name = asset.replace(".", "_")
         bpy.ops.export_scene.obj(
-            filepath=os.path.join(obj_save_dir, f"{save_asset_name}_{frame_nr:04d}.obj"),
+            filepath=os.path.join(obj_save_dir, f"{valid_asset}_{frame_nr:04d}.obj"),
             use_selection=True,
             use_mesh_modifiers=True,
             use_normals=False,
@@ -53,5 +62,6 @@ for frame_nr in frames:
             use_materials=False,
         )
         bpy.data.objects[asset].select_set(False)
-# save json
+
+scene_info["assets"] = valid_assets_keys
 json.dump(scene_info, open(os.path.join(args.output_dir, "scene_info.json"), "w"), indent=4)

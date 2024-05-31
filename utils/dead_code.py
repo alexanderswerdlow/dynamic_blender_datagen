@@ -46,3 +46,7 @@
 
         # rr.log(f"world/pred1", rr.Points3D(pred1, colors=img1))
         # rr.log(f"world/pred2", rr.Points3D(pred2, colors=img2))
+                    # dynamic_depth_map_path = self.data_path / scene / "dynamic_depths" / f"depth_{idx_to_str_5(im_idx)}_{idx_to_str_5(im1_idx)}.npz"
+            # loaded_data = np.load(dynamic_depth_map_path)
+            # pts3d = loaded_data["xyz"].astype(np.float32)
+            # valid_mask = loaded_data["dynamic_mask"].astype(bool)

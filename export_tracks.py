@@ -176,12 +176,14 @@ def tracking(data_root: Path, viz=False, profile=False):
     save_masks_root = data_root / "masks"
     save_normals_root = data_root / "normals"
     save_dynamic_depths_root = data_root / "dynamic_depths"
+    save_dynamic_points_root = data_root / "dynamic_points"
 
     save_rgbs_root.mkdir(parents=True, exist_ok=True)
     save_depths_root.mkdir(parents=True, exist_ok=True)
     save_masks_root.mkdir(parents=True, exist_ok=True)
     save_normals_root.mkdir(parents=True, exist_ok=True)
     save_dynamic_depths_root.mkdir(parents=True, exist_ok=True)
+    save_dynamic_points_root.mkdir(parents=True, exist_ok=True)
 
     frames = sorted(img_root.glob("*.png"))
     num_frames = len(frames)
@@ -303,6 +305,11 @@ def tracking(data_root: Path, viz=False, profile=False):
 
             obj_path = os.path.join(obj_root, f"{asset_name}_{str(blender_reference_frame).zfill(4)}.obj")
             mesh = trimesh.load(str(obj_path))
+
+            if not hasattr(mesh, 'vertices'):
+                print(f"Skipping {asset_name} because it has no geometry")
+                continue
+            
             asset_mask = np.logical_and(mask[:, :, 2] == pallette[idx + 1, 0], mask[:, :, 1] == pallette[idx + 1, 1])
             asset_mask = np.logical_and(asset_mask, mask[:, :, 0] == pallette[idx + 1, 2])
 
@@ -439,6 +446,7 @@ def tracking(data_root: Path, viz=False, profile=False):
     points_outside_image = np.full((len(points_to_track), window_size, num_objects), dtype=np.int64, fill_value=-1)
     points_inside_image = np.full((len(points_to_track), window_size, num_objects), dtype=np.int64, fill_value=-1)
 
+    save_raw_depth = False
     save_tracks = False
     if save_tracks:
         pixel_aligned_tracks = np.full((len(points_to_track), window_size, num_objects, max_num_pts, 3), dtype=np.float16, fill_value=np.nan)
@@ -447,18 +455,24 @@ def tracking(data_root: Path, viz=False, profile=False):
     for reference_frame_idx, reference_frame in tqdm(enumerate(points_to_track.keys())):
         if viz:
             rr.set_time_sequence("frame", reference_frame_idx)
-        cur_depth = repeat(depth_data[reference_frame], "h w () -> b h w ()", b=len(points_to_track))
-        cur_xyz = repeat(
-            unproject(
-                depth_data[reference_frame].squeeze(-1),
-                K_data[reference_frame_idx].astype(np.float32),
-                world2cam_data[reference_frame_idx].astype(np.float32),
-            ),
-            "h w c -> b h w c",
-            b=window_size,
-        )
 
-        dynamic_mask = np.full_like(cur_xyz[..., 0], False, dtype=bool)
+        if save_raw_depth:
+            cur_depth = repeat(depth_data[reference_frame], "h w () -> b h w ()", b=len(points_to_track))
+            cur_xyz = repeat(
+                unproject(
+                    depth_data[reference_frame].squeeze(-1),
+                    K_data[reference_frame_idx].astype(np.float32),
+                    world2cam_data[reference_frame_idx].astype(np.float32),
+                ),
+                "h w c -> b h w c",
+                b=window_size,
+            )
+
+            dynamic_mask = np.full_like(cur_xyz[..., 0], False, dtype=bool)
+
+        all_pts = []
+        all_coords = []
+        all_asset_idxs = []
 
         if viz:
             rr.log(f"world/depth_unproj", rr.Points3D(cur_xyz[0].reshape(-1, 3)))
@@ -467,6 +481,7 @@ def tracking(data_root: Path, viz=False, profile=False):
             _, _, _, coords = points_to_track[reference_frame][asset_name]
 
             _data = tracked_points[reference_frame][asset_name]
+
             if type(_data) == list:
                 pts = np.stack(_data, axis=0)
             else:
@@ -478,8 +493,13 @@ def tracking(data_root: Path, viz=False, profile=False):
             if viz:
                 rr.log(f"world/{asset_name}/orig_depth_unproj", rr.Points3D(cur_xyz[0, coords[:, 1], coords[:, 0]]))
 
-            cur_xyz[:, coords[:, 1], coords[:, 0]] = pts
-            dynamic_mask[:, coords[:, 1], coords[:, 0]] = True
+            if save_raw_depth:
+                cur_xyz[:, coords[:, 1], coords[:, 0]] = pts
+                dynamic_mask[:, coords[:, 1], coords[:, 0]] = True
+
+            all_pts.append(pts)
+            all_coords.append(coords)
+            all_asset_idxs.append(np.ones((pts.shape[1],)) * asset_idx)
 
             bs = pts.shape[0]
             pts = rearrange(pts, "b n c -> (b n) c")
@@ -487,7 +507,8 @@ def tracking(data_root: Path, viz=False, profile=False):
 
             uv = rearrange(uv, "(b n) c -> b n c", b=bs)
             z = rearrange(z, "(b n) c -> b n c", b=bs)
-            cur_depth[:, coords[:, 1], coords[:, 0]] = z
+            if save_raw_depth:
+                cur_depth[:, coords[:, 1], coords[:, 0]] = z
 
             within_bounds = (uv[..., 0] >= 0) & (uv[..., 0] < w) & (uv[..., 1] >= 0) & (uv[..., 1] < h)
 
@@ -499,12 +520,44 @@ def tracking(data_root: Path, viz=False, profile=False):
             for i in range(cur_depth.shape[0]):
                 rr.log(f"world/diff_pcd_{i}", rr.Points3D(cur_xyz[i].reshape(-1, 3)))
 
-        cur_xyz = cur_xyz.astype(np.float16)
-        for i in range(cur_depth.shape[0]):
+        if save_raw_depth:
+            cur_xyz = cur_xyz.astype(np.float16)
+            for i in range(cur_depth.shape[0]):
+                np.savez_compressed(
+                    save_dynamic_depths_root / f"depth_{idx_to_str_5(reference_frame_idx)}_{idx_to_str_5(i)}.npz",
+                    xyz=cur_xyz[i],
+                    dynamic_mask=dynamic_mask[i],
+                )
+
+        all_pts = np.concatenate(all_pts, axis=1)
+        all_coords = np.concatenate(all_coords, axis=0)
+        all_asset_idxs = np.concatenate(all_asset_idxs, axis=0)
+
+        assert np.all(all_pts < np.finfo(np.float16).max)
+        all_pts = all_pts.astype(np.float16)
+
+        assert np.all(all_coords < np.iinfo(np.uint16).max)
+        all_coords = all_coords.astype(np.uint16)
+
+        assert np.all(all_asset_idxs < np.iinfo(np.uint8).max)
+        all_asset_idxs = all_asset_idxs.astype(np.uint8)
+
+        all_asset_names = list(points_to_track[reference_frame].keys())
+        
+        np.savez_compressed(
+            save_dynamic_points_root / f"meta_{idx_to_str_5(reference_frame_idx)}.npz",
+            coords=all_coords,
+            asset_idxs=all_asset_idxs,
+            points_base=all_pts[reference_frame_idx].copy(),
+            depth=depth_data[reference_frame].squeeze(-1).copy(),
+            asset_names=all_asset_names,
+        )
+
+        all_pts -= all_pts[reference_frame_idx]
+        for i in range(all_pts.shape[0]):
             np.savez_compressed(
-                save_dynamic_depths_root / f"depth_{idx_to_str_5(reference_frame_idx)}_{idx_to_str_5(i)}.npz",
-                xyz=cur_xyz[i],
-                dynamic_mask=dynamic_mask[i],
+                save_dynamic_points_root / f"points_{idx_to_str_5(reference_frame_idx)}_{idx_to_str_5(i)}.npz",
+                points_delta=all_pts[i],
             )
 
     np.savez(os.path.join(data_root, "annotations.npz"), intrinsics=K_data, world2cam=world2cam_data)
@@ -523,12 +576,11 @@ def tracking(data_root: Path, viz=False, profile=False):
     
     return None
 
-
 def run_single_scene(**kwargs):
     with breakpoint_on_error():
         tracking(**kwargs)
-import typer
 
+import typer
 typer.main.get_command_name = lambda name: name
 app = typer.Typer(pretty_exceptions_show_locals=False)
 
@@ -544,8 +596,11 @@ def main(
         scene_list = [p.parent.relative_to(data_root) for p in data_root.rglob("scene_info.json")]
         print(scene_list)
         for scene in scene_list:
-            if (data_root / scene / "track_metadata.npz").exists():
-                print(f"Skipping {scene}")
+            # if (data_root / scene / "track_metadata.npz").exists():
+            #     print(f"Skipping {scene}")
+            #     continue
+            if (data_root / scene / "exr_img" / "depth_00001.png").exists() is False:
+                print(f"Skipping {scene} because there is no depth")
                 continue
             print(f"Running with scene: {scene}")
             run_single_scene(data_root=data_root / scene, viz=viz, profile=profile)
@@ -554,3 +609,5 @@ def main(
 
 if __name__ == "__main__":
     app()
+
+# singularity exec --bind /home/aswerdlo/repos/point_odyssey/singularity/config:/.config --nv singularity/blender.sif /bin/bash -c '$BLENDERPY /home/aswerdlo/repos/point_odyssey/export_tracks.py --data_root=generated/v6/default/6'
