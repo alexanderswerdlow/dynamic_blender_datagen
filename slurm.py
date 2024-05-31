@@ -138,7 +138,7 @@ def train(
     scene_dir = DATA_DIR / "scenes"
 
     if mode == "default":
-        args.end_frame = random_choice([32, 64, 128, 256, 384], [0.2, 0.4, 0.5, 0.3, 0.1]) if end_frame is None else end_frame
+        args.end_frame = random_choice([32, 64, 128, 256, 384], [0.5, 0.5, 0.4, 0.2, 0.1]) if end_frame is None else end_frame
         args.type = "human"
         args.add_smoke = False
         args.add_fog = False
@@ -263,7 +263,7 @@ def run_slurm(data_path, num_chunks, num_workers, partition, exclude: bool = Fal
         "--requeue=4",
         job_name=f"blender_{data_path.name}",
         cpus_per_task=4,
-        mem="16g",
+        mem="24g",
         export="ALL",
         gres=["gpu:1"],
         output=f"outputs/{Slurm.JOB_ARRAY_MASTER_ID}_{Slurm.JOB_ARRAY_ID}_{Slurm.JOB_ID}.out",

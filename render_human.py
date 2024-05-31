@@ -12,6 +12,7 @@ import sys
 import glob
 import json
 import shutil
+# from export_unified import RenderArgs
 
 FOCAL_LENGTH = 30
 SENSOR_WIDTH = 50
@@ -646,8 +647,6 @@ class Blender_render:
         for obj in character_collection.objects:
             obj.select_set(True)
 
-
-
     def load_assets(self):
         if self.use_animal:
             self.load_animal()
@@ -1262,7 +1261,16 @@ class Blender_render:
         sensor_width = camdata.sensor_width  # mm
         sensor_height = camdata.sensor_height  # mm
         scene_info = {"sensor_width": sensor_width, "sensor_height": sensor_height, "focal_length": focal, "assets": ["background"], "fps": bpy.context.scene.render.fps}
-        scene_info["assets"] += [x.data.name for x in self.assets_set]
+
+        if self.indoor:
+            assets_name = bpy.context.scene.objects.keys()
+            assets_name = [name for name in assets_name if bpy.data.objects[name].type == 'MESH']
+            scene_info["assets"] += assets_name
+            if len(self.assets_set) > 0:
+                scene_info["assets"] += [x.data.name for x in self.assets_set]
+        else:
+            scene_info["assets"] += [x.data.name for x in self.assets_set]
+
         json.dump(scene_info, open(os.path.join(self.scratch_dir, "scene_info.json"), "w"))
 
         use_multiview = self.views > 1
@@ -1415,9 +1423,7 @@ def get_calibration_matrix_K_from_blender(scene, mode="simple"):
 
 if __name__ == "__main__":
     import sys
-
     argv = sys.argv
-
     if "--" not in argv:
         argv = []
     else:
@@ -1425,45 +1431,16 @@ if __name__ == "__main__":
 
     print("argsv:{0}".format(argv))
     parser = argparse.ArgumentParser(description="Render Motion in 3D Environment for HuMoR Generation.")
-    parser.add_argument("--character_root", type=str, metavar="PATH", default="./data/robots/")
-    parser.add_argument("--camera_root", type=str, metavar="PATH", default="./data/camera_trajectory/MannequinChallenge")
-    parser.add_argument("--motion_root", type=str, metavar="PATH", default="./data/motions/")
-    parser.add_argument("--partnet_root", type=str, metavar="PATH", default="./data/partnet/")
-    parser.add_argument("--gso_root", type=str, metavar="PATH", default="./data/GSO/")
-    parser.add_argument("--background_hdr_path", type=str, default=None)
-    parser.add_argument("--scene_root", type=str, default="./data/blender_assets/hdri.blend")
     parser.add_argument("--output_dir", type=str, metavar="PATH", default="./", help="img save dir")
-    parser.add_argument("--output_name", type=str, metavar="PATH", help="img save name", default="test")
-    parser.add_argument("--force_step", type=int, default=3)
-    parser.add_argument("--force_interval", type=int, default=120)
-    parser.add_argument("--force_num", type=int, default=3)
-    parser.add_argument("--add_force", action="store_true", default=False)
-    parser.add_argument("--num_assets", type=int, default=5)
-    parser.add_argument("--use_gpu", action="store_true", default=False)
-    parser.add_argument("--indoor", action="store_true", default=False)
-    parser.add_argument("--views", type=int, default=1)
-    parser.add_argument("--render_engine", type=str, default="CYCLES", choices=["BLENDER_EEVEE", "CYCLES"])
-    parser.add_argument("--start_frame", type=int, default=None)
-    parser.add_argument("--end_frame", type=int, default=None)
-    parser.add_argument("--fps", type=int, default=None)
-    parser.add_argument("--samples_per_pixel", type=int, default=128)
-    parser.add_argument("--randomize", action="store_true", default=False)
-    parser.add_argument("--add_fog", action="store_true", default=False)
-    parser.add_argument("--fog_path", type=str, default=None)
-    parser.add_argument("--add_smoke", action="store_true", default=False)
-    parser.add_argument("--material_path", type=str, default=None)
-    parser.add_argument("--scene_scale", type=float, default=1.0)
-    parser.add_argument("--force_scale", type=float, default=1.0)
-    parser.add_argument("--use_animal", action="store_true", default=False)
-    parser.add_argument("--animal_path", type=str, default=None)
-    parser.add_argument("--animal_name", type=str, default=None)
-    args = parser.parse_args(argv)
-    print("args:{0}".format(args))
-    ## Load the world
-    output_dir = args.output_dir
-    os.makedirs(output_dir, exist_ok=True)
+    tmp_args = parser.parse_args(argv)
+    print("args:{0}".format(tmp_args))
+    
+    output_dir = Path(tmp_args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
 
-    assert args.start_frame == 1 or args.start_frame is None, "Start frame must be 1 or None"
+    import pickle
+    with open(output_dir / 'config.pkl', 'rb') as f:
+        args = pickle.load(f)
 
     renderer = Blender_render(
         samples_per_pixel=args.samples_per_pixel,

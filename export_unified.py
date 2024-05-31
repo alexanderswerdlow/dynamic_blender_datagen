@@ -4,11 +4,9 @@ from dataclasses import dataclass
 from pathlib import Path
 import shutil
 from typing import Optional
-
-from tap import Tap, to_tap_class
-
+# from tap import Tap, to_tap_class
 from constants import DATA_DIR, run_command
-
+import dataclasses
 
 @dataclass
 class RenderArgs():
@@ -60,6 +58,7 @@ class RenderArgs():
     force_interval: int = 120
     camera_root: Path = DATA_DIR / 'camera_trajectory' / 'MannequinChallenge'
     num_assets: int = 5
+    views: int = 1
 
     # Animal
     animal_path: Path = DATA_DIR / 'deformingthings4d'
@@ -68,51 +67,33 @@ class RenderArgs():
     use_animal: bool = False
     indoor: bool = False
 
-
 def render(args: RenderArgs):
     current_path = Path(os.path.dirname(os.path.realpath(__file__)))
     print(f"Render args: {args}")
     print(f"Current path: {current_path}")
     print(f"Rendering type: {args.type}")
+
+    # RenderTap = to_tap_class(RenderArgs)
+    # tap = RenderTap(description=__doc__)
+    # config_dict = dataclasses.asdict(args)
+    # args = tap.from_dict()
+    # args.save(args.output_dir / 'config.json')
+    # Pickle the args dataclass to a file
+    import pickle
+    with open(args.output_dir / 'config.pkl', 'wb') as f:
+        pickle.dump(args, f)
     
     blender_path = f'singularity run --bind {os.getcwd()}/singularity/config:/.config --nv singularity/blender.sif' if args.use_singularity else 'blender'
     rendering_script = (
         f"{blender_path} --background --python render_human.py -- "
-        f"--output_dir {args.output_dir} --character_root {args.character_root} "
-        f"--partnet_root {args.partnet_root} --gso_root {args.gso_root} "
-        f"--background_hdr_path {args.background_hdr_path} --scene_root {args.scene_root} "
-        f"--camera_root {args.camera_root} --num_assets {args.num_assets} "
-        f"--render_engine {args.render_engine} --force_num {args.force_num} "
-        f"--force_step {args.force_step} --force_interval {args.force_interval} "
-        f"--end_frame {args.end_frame} "
-        f"--fps {args.fps} "
-        f"--samples_per_pixel {args.samples_per_pixel} "
-        f"--scene_scale {args.scene_scale} --force_scale {args.force_scale} "
-        f"--animal_path {args.animal_path} "
+        f"--output_dir {args.output_dir} "
     )
-    if args.use_gpu:
-        rendering_script += ' --use_gpu'
-    if args.add_fog:
-        rendering_script += ' --add_fog'
-        rendering_script += f' --fog_path {args.fog_path}'
-    if args.randomize:
-        rendering_script += ' --randomize'
-    if args.material_path is not None:
-        rendering_script += f' --material_path {args.material_path}'
-    if args.add_smoke:
-        rendering_script += ' --add_smoke'
-    if args.add_force:
-        rendering_script += ' --add_force'
-    if args.use_animal:
-        rendering_script += ' --use_animal'
-    if args.indoor:
-        rendering_script += ' --indoor'
 
     run_command(rendering_script)
 
     if args.export_obj:
-        obj_script = f"{blender_path} --background --python {str(current_path / 'utils' / ('export_scene.py' if args.indoor is None else 'export_obj.py'))} \
-        -- --scene_root {args.output_dir / 'scene.blend'} --output_dir {args.output_dir}"
+        obj_script = f"{blender_path} --background --python {str(current_path / 'utils' / 'export_obj.py')} \
+        -- --scene_root {args.output_dir / 'scene.blend'} --output_dir {args.output_dir} --indoor {args.indoor}"
         run_command(obj_script)
 
     python_path = f"singularity exec --bind {os.getcwd()}/singularity/config:/.config --nv singularity/blender.sif /bin/bash -c '$BLENDERPY" if args.use_singularity else "python"
@@ -121,7 +102,7 @@ def render(args: RenderArgs):
         exr_script = f"{python_path} {str(current_path / 'utils' / 'openexr_utils.py')} --data_dir {args.output_dir} --output_dir {args.output_dir}/exr_img --batch_size {args.batch_size} --frame_idx {args.frame_idx}" + postfix
         run_command(exr_script)
 
-    if args.end_frame < 32 and args.indoor is False and args.use_animal is False:
+    if args.end_frame <= 64 and args.indoor is False and args.use_animal is False:
         if args.export_tracking:
             tracking_script = f"{python_path} {str(current_path / 'export_tracks.py')} --data_root {args.output_dir}" + postfix
             run_command(tracking_script)

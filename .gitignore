@@ -181,3 +181,4 @@ singularity/config
 singularity/overlay.img
 results_large/
 generated/
+singularity/.nfs*

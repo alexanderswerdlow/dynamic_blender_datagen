@@ -17,6 +17,8 @@ parser = argparse.ArgumentParser(description="Export obj data")
 
 parser.add_argument("--scene_root", type=str, default="")
 parser.add_argument("--output_dir", type=str, metavar="PATH", default="./", help="img save dir")
+parser.add_argument("--indoor", type=bool, default=False)
+
 args = parser.parse_args(argv)
 print("args:{0}".format(args))
 
@@ -25,12 +27,27 @@ frames = range(bpy.context.scene.frame_start, bpy.context.scene.frame_end + 1)
 print(f"Loaded frame range: {frames}")
 print(f"Loaded frame FPS: {bpy.context.scene.render.fps}")
 
+if args.indoor:
+    collection_set = ['Furniture', 'Wall', 'Floor', 'Ceiling']
+    scene_assets_keys = []
+    for collection_name in collection_set:
+        if not collection_name in bpy.data.collections:
+            continue
+        collection = bpy.data.collections[collection_name]
+        scene_assets_keys += [obj.name for obj in collection.objects if obj.type == 'MESH' and not obj.hide_render and not 'Fire' in obj.name and not 'Smoke' in obj.name]
+
 assets_keys = bpy.data.objects.keys()
 assets_keys = [
     key
     for key in assets_keys
     if bpy.data.objects[key].type == "MESH" and key != "Plane" and "Smoke" not in key and not bpy.data.objects[key].hide_render
 ]
+
+if args.indoor:
+    print(f"Started with {len(assets_keys)} assets")
+    assets_keys = [s for s in assets_keys if s not in scene_assets_keys]
+    print(f"Removed {len(scene_assets_keys)} assets as they are in the background")
+
 scene_info = json.load(open(os.path.join(args.output_dir, "scene_info.json"), "r"))
 
 scene_info["assets"] = ["background"] + assets_keys
@@ -63,5 +80,7 @@ for frame_nr in frames:
         )
         bpy.data.objects[asset].select_set(False)
 
-scene_info["assets"] = valid_assets_keys
+scene_info["assets"] = ["background"] + assets_keys
+scene_info["assets_saved"] = ["background"] + valid_assets_keys
+
 json.dump(scene_info, open(os.path.join(args.output_dir, "scene_info.json"), "w"), indent=4)

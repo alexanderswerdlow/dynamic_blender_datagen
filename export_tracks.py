@@ -3,6 +3,7 @@ import json
 import os
 import shutil
 from collections import defaultdict
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 import cv2
@@ -38,6 +39,7 @@ def read_obj_file(obj_path: str):
     obj_f.close()
 
     return np.asarray(vertices), np.asarray(faces)
+
 
 def read_obj_file_triangles(obj_path: str):
     vertices, faces = read_obj_file(obj_path)
@@ -161,6 +163,11 @@ def idx_to_str_4(idx):
 def idx_to_str_5(idx):
     return str(idx).zfill(5)
 
+def find_value_in_txt(file_path, key):
+    with open(file_path, "r") as file:
+        for line in file:
+            if line.startswith(key):
+                return line.split("=")[1].strip()
 
 def tracking(data_root: Path, viz=False, profile=False):
     print(f"Exporting tracks for {data_root}")
@@ -197,8 +204,15 @@ def tracking(data_root: Path, viz=False, profile=False):
     R3 = np.array([[-1, 0, 0, 0], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]])
 
     scene_info = json.load(open(os.path.join(data_root, "scene_info.json"), "r"))
-    assets = scene_info["assets"]
-    pallette = plotting.hls_palette(len(assets) + 2)
+    assets_blender = scene_info["assets"]
+    assets_saved = scene_info["assets_saved"]
+    assert len(assets_blender) == len(assets_saved)
+
+    if assets_blender[0] != "background":
+        print("WARNING: Adding background to the assets")
+        assets_blender.insert(0, "background")
+
+    pallette = plotting.hls_palette(len(assets_blender) + 2)
 
     if viz:
         import rerun as rr
@@ -297,19 +311,20 @@ def tracking(data_root: Path, viz=False, profile=False):
         pixel_coords = np.vstack((j_flat, i_flat)).T  # Shape: [h*w, 2]
         pixel_coords = pixel_coords.reshape(h, w, 2)
 
-        for idx in range(len(assets)):
-            asset = assets[idx]
+        for idx in range(len(assets_saved)):
+            asset = assets_saved[idx]
             asset_name = asset.replace(".", "_")
+
             if asset_name == "background":
                 continue
 
             obj_path = os.path.join(obj_root, f"{asset_name}_{str(blender_reference_frame).zfill(4)}.obj")
             mesh = trimesh.load(str(obj_path))
 
-            if not hasattr(mesh, 'vertices'):
+            if not hasattr(mesh, "vertices"):
                 print(f"Skipping {asset_name} because it has no geometry")
                 continue
-            
+
             asset_mask = np.logical_and(mask[:, :, 2] == pallette[idx + 1, 0], mask[:, :, 1] == pallette[idx + 1, 1])
             asset_mask = np.logical_and(asset_mask, mask[:, :, 0] == pallette[idx + 1, 2])
 
@@ -383,6 +398,7 @@ def tracking(data_root: Path, viz=False, profile=False):
 
     if profile:
         from viztracer import VizTracer
+
         tracer = VizTracer(tracer_entries=2000000)
         tracer.start()
 
@@ -395,11 +411,14 @@ def tracking(data_root: Path, viz=False, profile=False):
             ]
 
             if True:
-                all_object_triangles = np.stack([loaded_meshes[target_frame_idx][asset_name].triangles for idx, target_frame_idx in enumerate(sorted(points_to_track.keys()))], axis=0)
-                all_points = rearrange(all_object_triangles[:, index_faces], 'b n ... -> (b n) ...')
-                all_barycentric_coords = repeat(intersection_points_barycentric_coordinates, 'n c -> (b n) c', b=all_object_triangles.shape[0])
+                all_object_triangles = np.stack(
+                    [loaded_meshes[target_frame_idx][asset_name].triangles for idx, target_frame_idx in enumerate(sorted(points_to_track.keys()))],
+                    axis=0,
+                )
+                all_points = rearrange(all_object_triangles[:, index_faces], "b n ... -> (b n) ...")
+                all_barycentric_coords = repeat(intersection_points_barycentric_coordinates, "n c -> (b n) c", b=all_object_triangles.shape[0])
                 all_points_on_mesh = trimesh.triangles.barycentric_to_points(all_points, all_barycentric_coords)
-                all_points_on_mesh = rearrange(all_points_on_mesh, '(b n) ... -> b n ...', b=all_object_triangles.shape[0])
+                all_points_on_mesh = rearrange(all_points_on_mesh, "(b n) ... -> b n ...", b=all_object_triangles.shape[0])
                 tracked_points[reference_frame_idx][asset_name] = all_points_on_mesh
             else:
                 for idx, target_frame_idx in enumerate(sorted(points_to_track.keys())):
@@ -543,7 +562,7 @@ def tracking(data_root: Path, viz=False, profile=False):
         all_asset_idxs = all_asset_idxs.astype(np.uint8)
 
         all_asset_names = list(points_to_track[reference_frame].keys())
-        
+
         np.savez_compressed(
             save_dynamic_points_root / f"meta_{idx_to_str_5(reference_frame_idx)}.npz",
             coords=all_coords,
@@ -553,11 +572,10 @@ def tracking(data_root: Path, viz=False, profile=False):
             asset_names=all_asset_names,
         )
 
-        all_pts -= all_pts[reference_frame_idx]
+        all_pts -= all_pts[reference_frame_idx] # Helps w/compression
         for i in range(all_pts.shape[0]):
             np.savez_compressed(
-                save_dynamic_points_root / f"points_{idx_to_str_5(reference_frame_idx)}_{idx_to_str_5(i)}.npz",
-                points_delta=all_pts[i],
+                save_dynamic_points_root / f"points_{idx_to_str_5(reference_frame_idx)}_{idx_to_str_5(i)}.npz", points_delta=all_pts[i]
             )
 
     np.savez(os.path.join(data_root, "annotations.npz"), intrinsics=K_data, world2cam=world2cam_data)
@@ -568,46 +586,67 @@ def tracking(data_root: Path, viz=False, profile=False):
         )
     else:
         np.savez_compressed(
-            os.path.join(data_root, "track_metadata.npz"), 
+            os.path.join(data_root, "track_metadata.npz"),
             points_outside_image=points_outside_image,
             points_inside_image=points_inside_image,
-            # **{f"{asset_name}":points_inside_image[:, :, i] for i, asset_name in enumerate(points_to_track[next(iter(points_to_track.keys()))].keys())}
         )
-    
+
     return None
+
 
 def run_single_scene(**kwargs):
     with breakpoint_on_error():
         tracking(**kwargs)
 
+
 import typer
+
 typer.main.get_command_name = lambda name: name
 app = typer.Typer(pretty_exceptions_show_locals=False)
 
+
+def process_scene(scene, data_root, viz, profile):
+    try:
+        run_single_scene(data_root=data_root / scene, viz=viz, profile=profile)
+    except Exception as e:
+        print(f"Failed to process scene {scene}: {e}")
+
+
 @app.command()
-def main(
-    data_root: Path = Path("results/outdoor/0"),
-    viz: bool = False,
-    profile: bool = False,
-    recursive: bool = False,
-):
+def main(data_root: Path = Path("results/outdoor/0"), viz: bool = False, profile: bool = False, recursive: bool = False, num_workers: int = 10):
     print(f"Running with dir: {data_root}")
     if recursive:
         scene_list = [p.parent.relative_to(data_root) for p in data_root.rglob("scene_info.json")]
         print(scene_list)
-        for scene in scene_list:
-            # if (data_root / scene / "track_metadata.npz").exists():
-            #     print(f"Skipping {scene}")
-            #     continue
-            if (data_root / scene / "exr_img" / "depth_00001.png").exists() is False:
-                print(f"Skipping {scene} because there is no depth")
-                continue
-            print(f"Running with scene: {scene}")
-            run_single_scene(data_root=data_root / scene, viz=viz, profile=profile)
+        with ProcessPoolExecutor(max_workers=num_workers) as executor:
+            futures = {
+                executor.submit(process_scene, scene, data_root, viz, profile): scene
+                for scene in scene_list
+                if ((data_root / scene / "exr_img" / "depth_00001.png").exists())  # (data_root / scene / "track_metadata.npz").exists() is False and
+            }
+            for future in as_completed(futures):
+                scene = futures[future]
+                try:
+                    future.result()
+                except Exception as e:
+                    print(f"Error processing scene {scene}: {e}")
     else:
         run_single_scene(data_root=data_root, viz=viz, profile=profile)
+
 
 if __name__ == "__main__":
     app()
 
-# singularity exec --bind /home/aswerdlo/repos/point_odyssey/singularity/config:/.config --nv singularity/blender.sif /bin/bash -c '$BLENDERPY /home/aswerdlo/repos/point_odyssey/export_tracks.py --data_root=generated/v6/default/6'
+# singularity exec --bind /home/aswerdlo/repos/point_odyssey/singularity/config:/.config --nv singularity/blender.sif /bin/bash -c '$BLENDERPY /home/aswerdlo/repos/point_odyssey/export_tracks.py --data_root=generated/v4 --recursive'
+
+
+# singularity run --bind /home/aswerdlo/repos/point_odyssey/singularity/config:/.config --nv singularity/blender.sif --background --python /home/aswerdlo/repos/point_odyssey/scripts/export_scene_test_2.py -- --scene_root generated/v6/default/22/scene.blend --output_dir generated/v6/default/22
+
+# singularity run --bind /home/aswerdlo/repos/point_odyssey/singularity/config:/.config --nv singularity/blender.sif --background --python /home/aswerdlo/repos/point_odyssey/utils/export_obj.py -- --scene_root generated/v6/default/22/scene.blend --output_dir generated/v6/default/22 --indoor True
+
+# singularity exec --bind /home/aswerdlo/repos/point_odyssey/singularity/config:/.config --nv singularity/blender.sif /bin/bash -c '$BLENDERPY /home/aswerdlo/repos/point_odyssey/utils/openexr_utils.py --data_dir generated/v6/default/22 --output_dir generated/v6/default/22/exr_img --batch_size 32 --frame_idx 1'
+
+# singularity exec --bind /home/aswerdlo/repos/point_odyssey/singularity/config:/.config --nv singularity/blender.sif /bin/bash -c '$BLENDERPY /home/aswerdlo/repos/point_odyssey/export_tracks.py --data_root=generated/v6/default/22'
+
+
+# singularity exec --bind /home/aswerdlo/repos/point_odyssey/singularity/config:/.config --nv singularity/blender.sif /bin/bash -c '$BLENDERPIP install typed-argument-parser'

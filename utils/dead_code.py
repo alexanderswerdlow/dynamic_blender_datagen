@@ -50,3 +50,72 @@
             # loaded_data = np.load(dynamic_depth_map_path)
             # pts3d = loaded_data["xyz"].astype(np.float32)
             # valid_mask = loaded_data["dynamic_mask"].astype(bool)
+
+
+
+
+    parser.add_argument("--character_root", type=str, metavar="PATH", default="./data/robots/")
+    parser.add_argument("--camera_root", type=str, metavar="PATH", default="./data/camera_trajectory/MannequinChallenge")
+    parser.add_argument("--motion_root", type=str, metavar="PATH", default="./data/motions/")
+    parser.add_argument("--partnet_root", type=str, metavar="PATH", default="./data/partnet/")
+    parser.add_argument("--gso_root", type=str, metavar="PATH", default="./data/GSO/")
+    parser.add_argument("--background_hdr_path", type=str, default=None)
+    parser.add_argument("--scene_root", type=str, default="./data/blender_assets/hdri.blend")
+
+                parser.add_argument("--output_name", type=str, metavar="PATH", help="img save name", default="test")
+    parser.add_argument("--force_step", type=int, default=3)
+    parser.add_argument("--force_interval", type=int, default=120)
+    parser.add_argument("--force_num", type=int, default=3)
+    parser.add_argument("--add_force", action="store_true", default=False)
+    parser.add_argument("--num_assets", type=int, default=5)
+    parser.add_argument("--use_gpu", action="store_true", default=False)
+    parser.add_argument("--indoor", action="store_true", default=False)
+    parser.add_argument("--views", type=int, default=1)
+    parser.add_argument("--render_engine", type=str, default="CYCLES", choices=["BLENDER_EEVEE", "CYCLES"])
+    parser.add_argument("--start_frame", type=int, default=None)
+    parser.add_argument("--end_frame", type=int, default=None)
+    parser.add_argument("--fps", type=int, default=None)
+    parser.add_argument("--samples_per_pixel", type=int, default=128)
+    parser.add_argument("--randomize", action="store_true", default=False)
+    parser.add_argument("--add_fog", action="store_true", default=False)
+    parser.add_argument("--fog_path", type=str, default=None)
+    parser.add_argument("--add_smoke", action="store_true", default=False)
+    parser.add_argument("--material_path", type=str, default=None)
+    parser.add_argument("--scene_scale", type=float, default=1.0)
+    parser.add_argument("--force_scale", type=float, default=1.0)
+    parser.add_argument("--use_animal", action="store_true", default=False)
+    parser.add_argument("--animal_path", type=str, default=None)
+    parser.add_argument("--animal_name", type=str, default=None)
+
+
+    rendering_script = (
+        f"{blender_path} --background --python render_human.py -- "
+        f"--output_dir {args.output_dir} --character_root {args.character_root} "
+        f"--partnet_root {args.partnet_root} --gso_root {args.gso_root} "
+        f"--background_hdr_path {args.background_hdr_path} --scene_root {args.scene_root} "
+        f"--camera_root {args.camera_root} --num_assets {args.num_assets} "
+        f"--render_engine {args.render_engine} --force_num {args.force_num} "
+        f"--force_step {args.force_step} --force_interval {args.force_interval} "
+        f"--end_frame {args.end_frame} "
+        f"--fps {args.fps} "
+        f"--samples_per_pixel {args.samples_per_pixel} "
+        f"--scene_scale {args.scene_scale} --force_scale {args.force_scale} "
+        f"--animal_path {args.animal_path} "
+    )
+    if args.use_gpu:
+        rendering_script += ' --use_gpu'
+    if args.add_fog:
+        rendering_script += ' --add_fog'
+        rendering_script += f' --fog_path {args.fog_path}'
+    if args.randomize:
+        rendering_script += ' --randomize'
+    if args.material_path is not None:
+        rendering_script += f' --material_path {args.material_path}'
+    if args.add_smoke:
+        rendering_script += ' --add_smoke'
+    if args.add_force:
+        rendering_script += ' --add_force'
+    if args.use_animal:
+        rendering_script += ' --use_animal'
+    if args.indoor:
+        rendering_script += ' --indoor'
