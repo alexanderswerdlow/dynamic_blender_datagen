@@ -119,3 +119,32 @@
         rendering_script += ' --use_animal'
     if args.indoor:
         rendering_script += ' --indoor'
+
+
+            else:
+                for idx, target_frame_idx in enumerate(sorted(points_to_track.keys())):
+                    if cache_meshes:
+                        mesh = loaded_meshes[target_frame_idx][asset_name]
+                        triangles = mesh.triangles
+                    else:
+                        obj_path = os.path.join(
+                            obj_root, f"{asset_name}_{str(reference_frame_idx_to_blender_frame_idx[reference_frame_idx]).zfill(4)}.obj"
+                        )
+                        triangles = read_obj_file_triangles(str(obj_path))
+
+                    points_on_mesh = trimesh.triangles.barycentric_to_points(triangles[index_faces], intersection_points_barycentric_coordinates)
+                    if viz and abs(reference_frame_idx - target_frame_idx) < 4:
+                        rr.log(f"world/{asset_name}/{idx}_tracked_3d_frame_pos", rr.Points3D(points_on_mesh))
+                        if asset_name in tracked_points[reference_frame_idx] and len(tracked_points[reference_frame_idx][asset_name]) != 0:
+                            rr.log(
+                                f"world/{asset_name}/{idx}_tracked_3d_delta_frame_diff",
+                                rr.Arrows3D(
+                                    origins=tracked_points[reference_frame_idx][asset_name][-1],
+                                    vectors=points_on_mesh - tracked_points[reference_frame_idx][asset_name][-1],
+                                ),
+                            )
+
+                    if asset_name in tracked_points[reference_frame_idx]:
+                        tracked_points[reference_frame_idx][asset_name].append(points_on_mesh)
+                    else:
+                        tracked_points[reference_frame_idx][asset_name] = [points_on_mesh]

@@ -10,6 +10,7 @@ import cv2
 import sklearn
 import collections
 from tqdm import tqdm
+from export_unified import RenderTap
 from utils.file_io import *
 
 
@@ -249,26 +250,31 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser(description="Extract EXR files.")
-    parser.add_argument(
-        "--data_dir",
-        type=str,
-        metavar="PATH",
-        help="path to specific folder which include folders containing .obj files",
-        default="/Users/yangzheng/code/project/renderer/results/robot/",
-    )
-    parser.add_argument(
-        "--output_dir", type=str, metavar="PATH", default="/Users/yangzheng/code/project/renderer/results/robot/exr_img", help="img save dir"
-    )
-    parser.add_argument("--batch_size", type=int, default=32)
-    parser.add_argument("--frame_idx", type=int, default=1)
-    args = parser.parse_args()
-    print("args:{0}".format(args))
+    parser.add_argument("--output_dir", type=str, metavar="PATH", default="./", help="img save dir")
+    tmp_args = parser.parse_args()
 
-    os.makedirs(args.output_dir, exist_ok=True)
+    args = RenderTap(description=__doc__)
+    args.load(Path(tmp_args.output_dir) / 'config.json')
+
+    os.makedirs(args.output_dir / 'exr_img', exist_ok=True)
+
+    return_layers=["rgb", "depth"]
+    if args.export_segmentation:
+        return_layers.append("segmentation")
+    if args.export_normals:
+        return_layers.append("normal")
+    if args.export_flow:
+        return_layers.append("backward_flow")
+        return_layers.append("forward_flow")
+    if args.export_uv:
+        return_layers.append("uv")
+    if args.export_object_coordinates:
+        return_layers.append("object_coordinates")
+
     frames_dict = postprocess(
-        from_dir=args.data_dir,
-        return_layers=("rgb", "depth", "normal", "segmentation", "object_coordinates"),  # "backward_flow", "forward_flow",  # ,
+        from_dir=args.output_dir,
+        return_layers=return_layers,
         batch_size=args.batch_size,
-        output_dir=args.output_dir,
-        frame_idx=args.frame_idx,
+        output_dir=args.output_dir / 'exr_img',
+        frame_idx=args.start_frame,
     )

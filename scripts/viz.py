@@ -18,7 +18,7 @@ def find_value_in_txt(file_path, key):
             if line.startswith(key):
                 return int(line.split("=")[1].strip())
 
-results_path = 'generated/v6'
+results_path = 'debug'
 image_paths = sorted(find_image_paths(results_path), key=len, reverse=True)
 
 for path_list in image_paths:

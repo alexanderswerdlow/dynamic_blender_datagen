@@ -21,9 +21,10 @@ from typing import TYPE_CHECKING, Optional
 
 import numpy as np
 import torch
+import typer
 from tqdm import tqdm
 
-from constants import DATA_DIR, run_command, validation_blend_files
+from constants import DATA_DIR, run_command, validation_blender_scenes
 from export_unified import RenderArgs, render
 
 node_gpus = {
@@ -93,8 +94,14 @@ def train(
     local=False,
     existing_output_dir: Optional[Path] = None,
     fast: bool = False,
-    end_frame: Optional[int] = None,
+    num_frames: Optional[int] = None,
 ):
+    assert num_frames is not None
+    timestamp = time.time_ns() / 1_000_000_000
+    np.random.seed(int(timestamp))
+    random.seed(timestamp)
+    torch.manual_seed(timestamp)
+
     device = "cuda" if torch.cuda.is_available() else "cpu"
     try:
         job_id = os.getenv("SLURM_JOB_ID")
@@ -112,8 +119,7 @@ def train(
     print(result)
 
     if mode is None:
-        mode_probabilities = {"default": 1.0, "animal": 0.0}
-
+        mode_probabilities = {"generated": 0.3, "generated_deformable": 0.2, "premade": 0.5}
         modes = list(mode_probabilities.keys())
         probabilities = list(mode_probabilities.values())
         mode = random.choices(modes, probabilities)[0]
@@ -127,9 +133,9 @@ def train(
         use_gpu=True,
         samples_per_pixel=64,
         fps=32,
-        end_frame=512,
+        num_frames=512,
         batch_size=32,
-        background_hdr_path=DATA_DIR / "hdri",
+        background_hdr_folder=DATA_DIR / "hdri",
     )
 
     if existing_output_dir is not None:
@@ -152,63 +158,53 @@ def train(
     if "val" in data_path.name:
         args.validation = True
 
-    if mode == "default":
-        args.end_frame = random_choice([32, 64, 128, 256, 384], [0.5, 0.5, 0.4, 0.3, 0.1]) if end_frame is None else end_frame
-        args.type = "human"
+    args.num_frames = num_frames
+    args.num_assets = random.randint(5, 30)
+    args.add_force = random_choice([True, False], [0.7, 0.3])
+    args.fps = random.randint(4, 24)
+    args.force_interval = max(args.fps * random.randint(1, 6), args.num_frames // 2)
+    args.force_step = max(random.randint(1, 5), args.fps)
+    args.force_scale = random.uniform(0.1, 1.0)
+    args.custom_scene = DATA_DIR / "blender_assets/hdri_plane.blend"
+
+    if mode == "generated":
         args.add_smoke = False
         args.add_fog = False
-        args.num_assets = random_choice([2, 5, 8, 10, 12, 15, 20, 25, 30], [0.1, 0.2, 0.5, 0.5, 0.5, 0.7, 0.5, 0.3, 0.3])
-        args.add_force = random_choice([True, False], [0.5, 0.5])
-        args.force_interval = max(random_choice(
-            [args.end_frame // 1, args.end_frame // 2, args.end_frame // 4, args.end_frame // 8, args.end_frame // 16], [0.3, 0.5, 0.5, 0.3, 0.05]
-        ), 1)
-        args.force_step = random_choice([1, 2, 3, 4, 5], [0.6, 0.3, 0.2, 0.05, 0.05])
-        args.force_scale = random_choice([0.05, 0.1, 0.25, 0.4, 0.6, 1.0], [0.1, 0.2, 0.3, 0.4, 0.4, 0.3])
-        args.fps = random_choice([2, 5, 10, 15, 30], [0.1, 0.2, 0.2, 0.2, 0.1])
 
-        blend_files = list(scene_dir.glob("*.blend"))
-        blend_files.append(DATA_DIR / "blender_assets/hdri_plane.blend")
-        blend_files.append(DATA_DIR / "demo_scene/robot.blend")
-        if args.validation:
-            blend_files = [b for b in blend_files if b.name in validation_blend_files]
-        weights = [1] * len(blend_files)
-        weights[0] = len(blend_files) // 1.5
-        args.custom_scene = random.choices(blend_files, weights)[0]
-        args.use_animal = random_choice([True, False], [0.30, 0.70])
-
-    if mode == "animal":
+    elif mode == "generated_deformable":
         args.use_animal = True
-
-    if args.use_animal:
         args.custom_scene = DATA_DIR / "blender_assets" / "hdri_plane.blend"
         args.material_path = DATA_DIR / "blender_assets" / "animal_material.blend"
-        args.add_smoke = False
+        args.add_smoke = random_choice([True, False], [0.5, 0.5])
+        args.num_assets = random.randint(5, 18)
 
-    is_indoor = any(s in str(args.custom_scene) for s in ("blender_assets", )) is False
-
-    if is_indoor:
-        print("Setting indoor")
-        args.indoor = True
+    if mode == "premade":
+        print("Setting premade_scene")
+        blend_files = list(scene_dir.glob("*.blend"))
+        args.custom_scene = random.choice(blend_files)
+        args.premade_scene = True
         args.randomize = True
-        args.num_assets = max(args.num_assets, 10)
-        args.force_interval = max(args.force_interval, args.end_frame // 4)
-        args.background_hdr_path = None
+        args.add_objects = False
         args.add_force = False
-
+        args.fps = 24
+        args.add_fog = random_choice([True, False], [0.25, 0.75])
+            
     if fast:
         args.samples_per_pixel = 4
-        args.fps = 1
-        args.end_frame = 8
-        args.num_assets = 8
+        args.num_frames = 4
         args.add_force = True
         args.force_step = 1
         args.force_interval = 4
         args.force_scale = 1.0
         args.scene_scale = 1
-        args.remove_temporary_files = False
+        args.remove_temporary_files = True
+        args.num_assets = 64
+        args.add_objects = True
+        args.add_force = True
+        args.add_fog = True
 
-    if end_frame is not None:
-        args.end_frame = end_frame
+    if num_frames is not None:
+        args.num_frames = num_frames
 
     with open(output_dir / "slurm_metadata.txt", "w") as f:
         f.write(f"{os.getpid()} {socket.gethostname()} {device} {job_id} {addr}\n")
@@ -255,7 +251,7 @@ def tail_log_file(log_file_path, glob_str):
     print(f"File not found: {log_file_path} after {max_retries * retry_interval} seconds...")
 
 
-def run_slurm(data_path, num_chunks, num_workers, partition, exclude: bool = False, end_frame: Optional[int] = None):
+def run_slurm(data_path, num_chunks, num_workers, partition, exclude: bool = False, num_frames: Optional[int] = None, exclude_large_nodes: bool = True, mode: Optional[str] = None):
     print(f"Running slurm job with {num_chunks} chunks and {num_workers} workers...")
     from simple_slurm import Slurm
 
@@ -263,12 +259,23 @@ def run_slurm(data_path, num_chunks, num_workers, partition, exclude: bool = Fal
     if partition == "all" and exclude:
         kwargs["exclude"] = get_excluded_nodes("volta", "2080Ti")
 
+    if partition == "all" and exclude_large_nodes:
+        kwargs["exclude"] = ["matrix-1-14", "matrix-1-24", "matrix-2-25", "matrix-2-29", "matrix-3-18", "matrix-3-22", "matrix-3-26", "matrix-3-28"]
+
     print(kwargs)
+    assert num_frames is not None
+    mem_dict = {
+        32: "16g",
+        64: "24g",
+        128: "32g",
+        256: "48g",
+    }
+
     slurm = Slurm(
         "--requeue=4",
         job_name=f"blender_{data_path.name}",
         cpus_per_task=4,
-        mem="24g",
+        mem=mem_dict[max(num_frames, 32)],
         export="ALL",
         gres=["gpu:1"],
         output=f"outputs/{Slurm.JOB_ARRAY_MASTER_ID}_{Slurm.JOB_ARRAY_ID}_{Slurm.JOB_ID}.out",
@@ -277,16 +284,14 @@ def run_slurm(data_path, num_chunks, num_workers, partition, exclude: bool = Fal
         partition=partition,
         **kwargs,
     )
-
     run_str = f"python slurm.py --data_path={data_path} --is_slurm_task --slurm_task_index=$SLURM_ARRAY_TASK_ID"
-    if end_frame is not None:
-        run_str += f" --end_frame={end_frame}"
+    if num_frames is not None:
+        run_str += f" --num_frames={num_frames}"
+    if mode is not None:
+        run_str += f" --mode={mode}"
     job_id = slurm.sbatch(run_str)
     print(f"Submitted job {job_id} with {num_chunks} tasks and {num_workers} workers...")
     tail_log_file(Path(f"outputs"), f"{job_id}*")
-
-
-import typer
 
 typer.main.get_command_name = lambda name: name
 app = typer.Typer(pretty_exceptions_show_locals=False)
@@ -295,23 +300,24 @@ app = typer.Typer(pretty_exceptions_show_locals=False)
 @app.command()
 def main(
     data_path: Path = "results",
-    num_workers: int = 10,
-    num_to_process: int = 1000,
-    use_slurm: bool = False,
+    num_workers: Optional[int] = None,
+    num_to_process: Optional[int] = None,
     is_slurm_task: bool = False,
     slurm_task_index: int = None,
     partition: str = "all",
     existing_output_dir: Optional[Path] = None,
     local: bool = False,
     fast: bool = False,
-    end_frame: Optional[int] = None,
+    num_frames: Optional[int] = None,
     mode: Optional[str] = None,
 ):
-    if use_slurm:
-        run_slurm(data_path, num_to_process, num_workers, partition, end_frame=end_frame)
+    if num_workers is not None:
+        if num_to_process is None:
+            num_to_process = num_workers * 2
+        run_slurm(data_path, num_to_process, num_workers, partition, num_frames=num_frames, mode=mode)
     elif is_slurm_task:
         print(f"Running slurm task {slurm_task_index} ...")
-        train(data_path, slurm_task_index, end_frame=end_frame)
+        train(data_path, slurm_task_index, num_frames=num_frames, mode=mode)
     else:
         with breakpoint_on_error():
             train(
@@ -320,7 +326,7 @@ def main(
                 local=local,
                 existing_output_dir=existing_output_dir,
                 fast=fast,
-                end_frame=end_frame,
+                num_frames=num_frames,
                 mode=mode
             )
 

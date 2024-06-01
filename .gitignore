@@ -183,3 +183,4 @@ results_large/
 generated/
 singularity/.nfs*
 val_generated/
+archive/

@@ -17,10 +17,11 @@ class RenderArgs():
 
     # rendering settings
     rendering: bool = False
-    background_hdr_path: Path = DATA_DIR / 'hdri'
+    background_hdr_folder: Optional[Path] = DATA_DIR / 'hdri'
+    background_hdr_path: Optional[Path] = None
     add_fog: bool = False
     fog_path: Path = DATA_DIR / 'blender_assets' / 'fog.blend'
-    end_frame: int = 1100
+    num_frames: int = 1100
     samples_per_pixel: int = 1024
     use_gpu: bool = False
     randomize: bool = False
@@ -29,6 +30,12 @@ class RenderArgs():
     remove_temporary_files: bool = True
     scene_scale: float = 1.0
     force_scale: float = 1.0
+    export_segmentation: bool = True
+    export_uv: bool = False
+    export_normals: bool = False
+    export_flow: bool = False
+    export_object_coordinates: bool = False
+    add_objects: bool = True
 
     # exr settings
     exr: bool = False
@@ -57,59 +64,73 @@ class RenderArgs():
     camera_root: Path = DATA_DIR / 'camera_trajectory' / 'MannequinChallenge'
     num_assets: int = 5
     views: int = 1
+    start_frame: int = 1
 
     # Animal
     animal_path: Path = DATA_DIR / 'deformingthings4d'
     add_smoke: bool = False
     animal_name: str = None
     use_animal: bool = False
-    indoor: bool = False
+    premade_scene: bool = False
 
 RenderTap = to_tap_class(RenderArgs)
+
+def remove_file_or_folder(path: Path, raise_error: bool = True):
+    if path.exists():
+        if path.is_file():
+            os.remove(path)
+        else:
+            shutil.rmtree(path)
+    else:
+        if raise_error:
+            raise ValueError(f"Path {path} does not exist")
 
 def render(args: RenderArgs):
     current_path = Path(os.path.dirname(os.path.realpath(__file__)))
     print(f"Render args: {args}")
     print(f"Current path: {current_path}")
-    print(f"Rendering type: {args.type}")
 
     tap = RenderTap(description=__doc__)
     args = tap.from_dict(dataclasses.asdict(args))
     args.save(args.output_dir / 'config.json')
     
-    blender_path = f'singularity run --bind {os.getcwd()}/singularity/config:/.config --nv singularity/blender.sif' if args.use_singularity else 'blender'
-    rendering_script = (
-        f"{blender_path} --background --python render_human.py -- "
-        f"--output_dir {args.output_dir} "
-    )
+    if args.rendering:
+        blender_path = f'singularity run --bind {os.getcwd()}/singularity/config:/.config --nv singularity/blender.sif' if args.use_singularity else 'blender'
+        rendering_script = (
+            f"{blender_path} --background --python render.py -- "
+            f"--output_dir {args.output_dir} "
+        )
 
-    run_command(rendering_script)
+        run_command(rendering_script)
 
     if args.export_obj:
         obj_script = f"{blender_path} --background --python {str(current_path / 'utils' / 'export_obj.py')} \
-        -- --scene_root {args.output_dir / 'scene.blend'} --output_dir {args.output_dir} --indoor {args.indoor}"
+        -- --scene_root {args.output_dir / 'scene.blend'} --output_dir {args.output_dir} --premade_scene {args.premade_scene}"
         run_command(obj_script)
 
     python_path = f"singularity exec --bind {os.getcwd()}/singularity/config:/.config --nv singularity/blender.sif /bin/bash -c '$BLENDERPY" if args.use_singularity else "python"
     postfix = "'" if args.use_singularity else ""
     if args.exr:
-        exr_script = f"{python_path} {str(current_path / 'utils' / 'openexr_utils.py')} --data_dir {args.output_dir} --output_dir {args.output_dir}/exr_img --batch_size {args.batch_size} --frame_idx {args.frame_idx}" + postfix
+        exr_script = f"{python_path} {str(current_path / 'utils' / 'openexr_utils.py')} --output_dir {args.output_dir}" + postfix
         run_command(exr_script)
 
-    if args.end_frame <= 64:
+    if args.num_frames <= 64:
         if args.export_tracking:
-            tracking_script = f"{python_path} {str(current_path / 'export_tracks.py')} --data_root {args.output_dir}" + postfix
+            tracking_script = f"{python_path} {str(current_path / 'export_tracks.py')} --output_dir {args.output_dir}" + postfix
             run_command(tracking_script)
 
         if args.remove_temporary_files:
-            exr_path = args.output_dir / 'exr'
-            if exr_path.exists():
-                shutil.rmtree(exr_path)
-            else:
-                raise ValueError(f"exr_path {exr_path} does not exist")
+            remove_file_or_folder(args.output_dir / 'exr_img')
+            remove_file_or_folder(args.output_dir / 'images')
+            remove_file_or_folder(args.output_dir / 'obj')
     else:
-        print(f"End frame is {args.end_frame}, skipping exporting tracking and removing temporary files. You must export tracks separately.")
+        print(f"End frame is {args.num_frames}, skipping exporting tracking and removing temporary files. You must export tracks separately.")
 
+    if args.remove_temporary_files:
+        remove_file_or_folder(args.output_dir / 'exr')
+        remove_file_or_folder(args.output_dir / 'tmp', raise_error=False)
+        remove_file_or_folder(args.output_dir / 'scene.blend')
+        remove_file_or_folder(args.output_dir / 'scene.blend1', raise_error=False)
 
 if __name__ == '__main__':
     RenderTap = to_tap_class(RenderArgs)

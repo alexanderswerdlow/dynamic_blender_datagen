@@ -151,6 +151,7 @@ def copy_obj(data_root, animal_name, num_seq, save_path):
                 idx += 1
 
 def anime2obj(anime_path, save_path):
+    print(f"Converting {anime_path} to {save_path}")
     f = open(anime_path, 'rb')
     nf = np.fromfile(f, dtype=np.int32, count=1)[0]
     nv = np.fromfile(f, dtype=np.int32, count=1)[0]
@@ -180,8 +181,11 @@ def anime2obj(anime_path, save_path):
         if z_min < -z_diff * 0.2:
             return
         v_list.append(obj_v.copy())
+
     if not os.path.exists(save_path):
         os.makedirs(save_path)
+    
+    print(f"There are {nf} frames in {anime_path}")
     for i in range(nf):
         obj_v = v_list[i]
         obj_f = face_data
@@ -201,17 +205,16 @@ class Blender_render:
         use_denoising=True,
         samples_per_pixel=128,
         num_assets=2,
-        background_hdr_path=None,
         custom_scene=None,
         use_gpu: bool = False,
-        indoor: bool = False,
+        premade_scene: bool = False,
         add_force: bool = False,
         force_step: int = 3,
         force_num: int = 3,
         force_scale: float = 1.0,
         force_interval: int = 200,
         views: int = 1,
-        end_frame: int = None,
+        num_frames: int = None,
         fps: Optional[int] = None,
         randomize: bool = False,
         add_fog: bool = False,
@@ -222,21 +225,26 @@ class Blender_render:
         use_animal: bool = False,
         animal_path: Optional[str] = None,
         animal_name: Optional[str] = None,
-        validation: bool = False
+        validation: bool = False,
+        start_frame: int = 1,
+        args: Any = None,
     ):
+        
+        self.args = args
         self.validation = validation
-        self.background_hdr_path = None if background_hdr_path == "None" else background_hdr_path
-        if self.background_hdr_path is not None:
-            hdr_list = os.listdir(self.background_hdr_path)
-            hdr_list = [str(path) for path in Path(self.background_hdr_path).rglob("*") if path.suffix in [".hdr", ".exr"] and (use_animal is False or 'outdoor' in str(path)) and (not (s in str(path)) for s in urban_scenes)]
-            self.background_hdr_path = np.random.choice(hdr_list)
-            print(f"Background: {self.background_hdr_path}")
-
+        self.background_hdr_folder = self.args.background_hdr_folder
+        self.background_hdr_path = self.args.background_hdr_path
         self.scale_factor = scene_scale
-        self.indoor = indoor
-        print(f"Indoor: {self.indoor}")
+        self.premade_scene = premade_scene
 
-        if self.indoor is False:
+        if self.background_hdr_path is None and self.background_hdr_folder is not None:
+            hdr_list = [str(path) for path in Path(self.background_hdr_folder).rglob("*") if path.suffix in [".hdr", ".exr"] and (self.premade_scene or ('outdoor' in str(path) and not any(s in str(path) for s in urban_scenes)))]
+            self.background_hdr_path = np.random.choice(hdr_list)
+        
+        print(f"Background: {self.background_hdr_path}")
+        print(f"Premade: {self.premade_scene}")
+
+        if self.premade_scene is False:
             if self.background_hdr_path is not None and any(s in Path(self.background_hdr_path).parent.name for s in ("indoor", "demo_scene")):
                 print(f"Using {self.background_hdr_path} which is indoor, setting scale factor by 2")
                 self.scale_factor *= 2
@@ -257,7 +265,7 @@ class Blender_render:
         self.force_interval = force_interval
         self.add_force = add_force
         self.views = views
-        self.end_frame = end_frame
+        self.num_frames = num_frames
         self.fps = fps
         self.randomize = randomize
         self.add_fog = add_fog
@@ -268,6 +276,7 @@ class Blender_render:
         self.adaptive_sampling = adaptive_sampling  # speeds up rendering
         self.use_denoising = use_denoising  # improves the output quality
         self.samples_per_pixel = samples_per_pixel
+        self.start_frame = start_frame
 
         assert self.force_interval > 0
 
@@ -277,14 +286,16 @@ class Blender_render:
         self.GSO_path = GSO_path
         self.partnet_path = partnet_path
         self.character_path = character_path
-        self.use_character = indoor is False
+        self.use_character = premade_scene is False
         self.motion_path = motion_path
         self.GSO_path = GSO_path
         self.camera_path = camera_path
         self.motion_path = motion_path
-        self.add_objects = indoor is False
-        self.motion_datasets = [d.name for d in Path(motion_path).iterdir() if d.is_dir()]
-        self.motion_speed = {"TotalCapture": 1 / 1.5, "DanceDB": 1.0, "CMU": 1.0, "MoSh": 1.0 / 1.2, "SFU": 1.0 / 1.2}
+        self.add_objects = self.args.add_objects
+
+        if self.premade_scene is False and self.use_animal is False:
+            self.motion_datasets = [d.name for d in Path(motion_path).iterdir() if d.is_dir()]
+            self.motion_speed = {"TotalCapture": 1 / 1.5, "DanceDB": 1.0, "CMU": 1.0, "MoSh": 1.0 / 1.2, "SFU": 1.0 / 1.2}
 
         custom_scene = Path(custom_scene)
         assert custom_scene is not None
@@ -302,16 +313,23 @@ class Blender_render:
         self.assets_set = []
         self.gso_force = []
         self.setup_renderer()
-        if self.indoor is False:
+
+        if self.premade_scene is False:
             self.setup_scene()
 
-        self.activate_render_passes(normal=True, optical_flow=True, segmentation=True, uv=True)
+        print(f"Loading assets...")
+        self.load_assets()
+        print(f"Finished loading assets...")
+
+        self.activate_render_passes(normal=self.args.export_normals, optical_flow=self.args.export_flow, segmentation=self.args.export_segmentation, uv=self.args.export_uv)
         self.exr_output_node = self.set_up_exr_output_node()
 
         # self.blender_scene.render.resolution_percentage = 10
         if self.background_hdr_path is not None:
             print("loading hdr from:", self.background_hdr_path)
-            self.load_background_hdr(self.background_hdr_path)
+            self.load_background_hdr(str(self.background_hdr_path))
+            self.args.background_hdr_path = self.background_hdr_path
+            self.args.save(self.scratch_dir / 'config.json')
 
         if self.randomize and os.path.exists(self.material_path):
             self.randomize_scene()
@@ -321,14 +339,19 @@ class Blender_render:
         try:
             # Ensure you have the correct context
             blender_scene = bpy.context.scene
-            # Access the frame_start property
             print(blender_scene.frame_start)
         except Exception as e:
             print(f"An error occurred: {e}")
 
+        if self.use_animal:
+            bpy.ops.outliner.orphans_purge()
+            bpy.ops.outliner.orphans_purge(do_local_ids=True, do_recursive=True)
+            bpy.ops.file.pack_all() # pack external data
+
         # save blend file
         os.makedirs(scratch_dir, exist_ok=True)
         absolute_path = os.path.abspath(scratch_dir)
+
         bpy.ops.wm.save_as_mainfile(filepath=os.path.join(absolute_path, "scene.blend"))
 
     def set_render_engine(self):
@@ -396,7 +419,8 @@ class Blender_render:
         # setup render sampling
         bpy.context.scene.cycles.samples = self.samples_per_pixel
         # setup framerate
-        bpy.context.scene.render.fps = self.fps
+        if self.premade_scene is False:
+            bpy.context.scene.render.fps = self.fps
 
     def setup_scene(self):
         bpy.ops.object.camera_add()
@@ -423,9 +447,6 @@ class Blender_render:
         self.camera.data.clip_end = 10000
         self.camera.data.sensor_width = SENSOR_WIDTH
 
-        print(f"Setting up scene with {self.samples_per_pixel} samples per pixel")
-        print(f"Setting up scene with {self.fps} fps")
-
         # scale boundingbox object
         print(f"Cube in scene: {'Cube' in bpy.data.objects.keys()}")
         if  "Cube" in bpy.data.objects.keys():
@@ -450,11 +471,6 @@ class Blender_render:
 
         # disable gravity
         # bpy.context.scene.gravity = (0, 0, 0)
-
-        # load assets
-        print(f"Loading assets...")
-        self.load_assets()
-        print(f"Finished loading assets...")
 
     def set_cam(self, cam_loc, point):
         self.camera.location = self.cam_loc
@@ -570,19 +586,19 @@ class Blender_render:
         animal_list = sorted(animal_list, key=lambda x: os.path.getsize(os.path.join(self.animal_path, x)))[:50] # sort animal_list by file size
         animal_list = np.random.choice(animal_list, 30, replace=False if len(animal_list) > 30 else True)
 
-        print(f"Chose {animal_list}")
+        print(f"Chose {self.animal_name}, {animal_list}")
         print(f"Saving to {os.path.join(self.scratch_dir, 'tmp')}")
 
         animal_obj_savedir = Path(self.scratch_dir) / 'tmp'
         animal_obj_savedir.mkdir(parents=True, exist_ok=True)
-        animal_obj_savedir = str(animal_obj_savedir)
+
         for animal_seq in animal_list:
-            anime2obj(os.path.join(self.animal_path, animal_seq, animal_seq + '.anime'), os.path.join(animal_obj_savedir, animal_seq, 'mesh_seq'))
+            anime2obj(Path(self.animal_path) / animal_seq / f"{animal_seq}.anime", animal_obj_savedir / animal_seq / 'mesh_seq')
 
-        copy_obj(animal_obj_savedir, self.animal_name, 15, os.path.join(self.scratch_dir, 'tmp', 'animal_obj'))
+        print(f"Saved to: {animal_obj_savedir}")
+        copy_obj(animal_obj_savedir, self.animal_name, 15, Path(self.scratch_dir) / 'tmp' / 'animal_obj')
 
-        # set the end frame according to the number of frames in the sequence
-        bpy.context.scene.frame_end = len(os.listdir(os.path.join(self.scratch_dir, 'tmp', 'animal_obj')))
+        bpy.context.scene.frame_end = len(list((Path(self.scratch_dir) / 'tmp' / 'animal_obj').iterdir()))
 
         # load mesh sequence
         seq_imp_settings = bpy.types.PropertyGroup.bl_rna_get_subclass_py("SequenceImportSettings")
@@ -613,7 +629,6 @@ class Blender_render:
         try:
             furry_material = [f for f in bpy.data.materials if 'Animal' in f.name]
             furry_material = np.random.choice(furry_material)
-
             self.animal.data.materials.clear()
             self.animal.data.materials.append(furry_material)
         except:
@@ -656,27 +671,24 @@ class Blender_render:
         for obj in character_collection.objects:
             obj.select_set(True)
 
+        bpy.ops.transform.resize(
+            value=(self.scale_factor * 1.2, self.scale_factor * 1.2, self.scale_factor * 1.2),
+            orient_type="GLOBAL",
+            orient_matrix=((1, 0, 0), (0, 1, 0), (0, 0, 1)),
+            orient_matrix_type="GLOBAL",
+            mirror=False,
+            use_proportional_edit=False,
+            proportional_edit_falloff="SMOOTH",
+            proportional_size=1,
+            use_proportional_connected=False,
+            use_proportional_projected=False,
+        )
+
     def load_assets(self):
         if self.use_animal:
             self.load_animal()
-
         elif self.use_character:
             self.load_character()
-
-        if self.indoor is False:
-            # add scale
-            bpy.ops.transform.resize(
-                value=(self.scale_factor * 1.2, self.scale_factor * 1.2, self.scale_factor * 1.2),
-                orient_type="GLOBAL",
-                orient_matrix=((1, 0, 0), (0, 1, 0), (0, 0, 1)),
-                orient_matrix_type="GLOBAL",
-                mirror=False,
-                use_proportional_edit=False,
-                proportional_edit_falloff="SMOOTH",
-                proportional_size=1,
-                use_proportional_connected=False,
-                use_proportional_projected=False,
-            )
 
         if self.add_smoke:
             # add a cube
@@ -831,6 +843,7 @@ class Blender_render:
 
         # add force
         if self.add_force:
+            assert self.add_objects
             for i in range(self.force_num):
                 dxyz = np.random.uniform(-4, 4, size=3) * self.scale_factor
                 dxyz[2] = -abs(dxyz[2]) * 5
@@ -846,6 +859,7 @@ class Blender_render:
                 bpy.context.object.field.use_max_distance = True
                 bpy.context.object.field.distance_max = 1000
                 bpy.context.object.field.strength = np.random.uniform(1000, 200)
+
         print("len of assets_set:", len(self.assets_set))
         print("len of forces:", len(self.gso_force))
 
@@ -868,12 +882,25 @@ class Blender_render:
         return farthest_point
 
     def load_background_hdr(self, background_hdr_path):
-        world = bpy.context.scene.world
+        if self.premade_scene:
+            world = bpy.context.scene.world
+            for node in world.node_tree.nodes:
+                world.node_tree.nodes.remove(node)
 
-        node_env = world.node_tree.nodes["Environment Texture"]
-        node_env.image = bpy.data.images.load(background_hdr_path)  # bpy.data.images[os.path.basename(background_hdr_path)]
+            node_background = world.node_tree.nodes.new(type='ShaderNodeBackground')
+            node_env = world.node_tree.nodes.new(type='ShaderNodeTexEnvironment')
+            node_output = world.node_tree.nodes.new(type='ShaderNodeOutputWorld')
+            node_env.image = bpy.data.images.load(background_hdr_path)
+            world.node_tree.links.new(node_env.outputs["Color"], node_background.inputs["Color"])
+            world.node_tree.links.new(node_background.outputs["Background"], node_output.inputs["Surface"])
+        else:
+
+            world = bpy.context.scene.world
+            node_env = world.node_tree.nodes["Environment Texture"]
+            node_env.image = bpy.data.images.load(background_hdr_path)
 
     def load_asset_texture(self, obj, mat_name, texture_path, normal_path=None, roughness_path=None):
+        print(f"Loading texture for {obj.name}, {texture_path}, {normal_path}, {roughness_path}, {mat_name}")
         mat = bpy.data.materials.new(name=mat_name)
 
         mat.use_nodes = True
@@ -1208,7 +1235,16 @@ class Blender_render:
             f"Default start/end range: {range(bpy.context.scene.frame_start, bpy.context.scene.frame_end + 1)}, Default FPS: {bpy.context.scene.render.fps}"
         )
 
-        bpy.context.scene.frame_end = self.end_frame
+        scene_start, scene_end = bpy.context.scene.frame_start, bpy.context.scene.frame_end
+        start_frame = np.random.randint(scene_start, scene_end - self.num_frames + 2)
+        end_frame = start_frame + self.num_frames - 1
+
+        bpy.context.scene.frame_start = start_frame
+        bpy.context.scene.frame_end = end_frame
+
+        self.args.start_frame = start_frame
+        self.args.end_frame = end_frame
+        self.args.save(self.args.output_dir / 'config.json')
 
         print(
             f"New start/end range: {range(bpy.context.scene.frame_start, bpy.context.scene.frame_end + 1)}, New FPS: {bpy.context.scene.render.fps}",
@@ -1219,7 +1255,7 @@ class Blender_render:
         """
         print("Using scratch rendering folder: '%s'" % self.scratch_dir)
 
-        if self.indoor is False:
+        if self.add_objects:
             # setup rigid world cache
             bpy.context.scene.rigidbody_world.point_cache.frame_start = 1
             bpy.context.scene.rigidbody_world.point_cache.frame_end = bpy.context.scene.frame_end + 1
@@ -1262,14 +1298,15 @@ class Blender_render:
                     force_source.keyframe_insert(data_path="field.distance_max", frame=frame_nr + self.force_step)
                     force_source.keyframe_insert(data_path="field.distance_max", frame=frame_nr + self.force_interval - 1)
 
-        # bpy.ops.wm.save_as_mainfile(filepath=os.path.join(absolute_path, 'scene1.blend'))
-        # bake rigid body simulation
-        if self.indoor is False:
+        
+        if self.add_objects:
             bpy.ops.object.select_all(action="SELECT")
             bpy.context.view_layer.objects.active = self.assets_set[0]
-            print("start baking")
+            print("start baking") # bake rigid body simulation
             self.bake_to_keyframes(frames[0], frames[-1], 1)
             print("baking done")
+
+        if self.premade_scene is False:
             camdata = self.camera.data
         else:
             camdata = bpy.context.scene.camera.data
@@ -1281,7 +1318,7 @@ class Blender_render:
         sensor_height = camdata.sensor_height  # mm
         scene_info = {"sensor_width": sensor_width, "sensor_height": sensor_height, "focal_length": focal, "assets": ["background"], "fps": bpy.context.scene.render.fps}
 
-        if self.indoor:
+        if self.premade_scene:
             assets_name = bpy.context.scene.objects.keys()
             assets_name = [name for name in assets_name if bpy.data.objects[name].type == 'MESH']
             scene_info["assets"] += assets_name
@@ -1295,7 +1332,6 @@ class Blender_render:
         use_multiview = self.views > 1
 
         self.set_exr_output_path(os.path.join(self.scratch_dir, "exr", "frame_"))
-        # --- starts rendering
 
         if not use_multiview:
             camera_save_dir = os.path.join(self.scratch_dir, "cam")
@@ -1303,7 +1339,7 @@ class Blender_render:
             os.makedirs(camera_save_dir, exist_ok=True)
             os.makedirs(obj_save_dir, exist_ok=True)
 
-            if self.indoor is False:
+            if self.premade_scene is False:
                 # set camera poses from real camera trajectory
                 camera_files = glob.glob(os.path.join(self.camera_path, "*/*.txt"))
                 # filter out small files
@@ -1328,7 +1364,7 @@ class Blender_render:
                 np.savetxt(os.path.join(camera_save_dir, f"K_{frame_nr:04d}.txt"), K)
                 print("Rendered frame '%s'" % bpy.context.scene.render.filepath)
         else:
-            assert self.indoor is False
+            assert self.premade_scene is False
             # set camera poses from real camera trajectory
             camera_files = glob.glob(os.path.join(self.camera_path, "*/*.txt"))
             # filter out small files
@@ -1468,18 +1504,17 @@ if __name__ == "__main__":
         character_path=args.character_root,
         motion_path=args.motion_root,
         camera_path=args.camera_root,
-        background_hdr_path=args.background_hdr_path,
         GSO_path=args.gso_root,
         num_assets=args.num_assets,
         custom_scene=args.custom_scene,
-        indoor=args.indoor,
+        premade_scene=args.premade_scene,
         partnet_path=args.partnet_root,
         add_force=args.add_force,
         force_step=args.force_step,
         force_interval=args.force_interval,
         force_num=args.force_num,
         views=args.views,
-        end_frame=args.end_frame,
+        num_frames=args.num_frames,
         fps=args.fps,
         randomize=args.randomize,
         add_fog=args.add_fog,
@@ -1491,7 +1526,9 @@ if __name__ == "__main__":
         use_animal=args.use_animal,
         animal_path=args.animal_path,
         animal_name=args.animal_name,
-        validation=args.validation
+        validation=args.validation,
+        start_frame=args.start_frame,
+        args=args
     )
 
     renderer.render()

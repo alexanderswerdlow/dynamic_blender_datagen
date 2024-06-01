@@ -17,7 +17,7 @@ parser = argparse.ArgumentParser(description="Export obj data")
 
 parser.add_argument("--scene_root", type=str, default="")
 parser.add_argument("--output_dir", type=str, metavar="PATH", default="./", help="img save dir")
-parser.add_argument("--indoor", type=bool, default=False)
+parser.add_argument("--premade_scene", type=bool, default=False)
 
 args = parser.parse_args(argv)
 print("args:{0}".format(args))
@@ -27,7 +27,7 @@ frames = range(bpy.context.scene.frame_start, bpy.context.scene.frame_end + 1)
 print(f"Loaded frame range: {frames}")
 print(f"Loaded frame FPS: {bpy.context.scene.render.fps}")
 
-if args.indoor:
+if args.premade_scene:
     collection_set = ['Furniture', 'Wall', 'Floor', 'Ceiling']
     scene_assets_keys = []
     for collection_name in collection_set:
@@ -43,7 +43,7 @@ assets_keys = [
     if bpy.data.objects[key].type == "MESH" and key != "Plane" and "Smoke" not in key and not bpy.data.objects[key].hide_render
 ]
 
-if args.indoor:
+if args.premade_scene:
     print(f"Started with {len(assets_keys)} assets")
     assets_keys = [s for s in assets_keys if s not in scene_assets_keys]
     print(f"Removed {len(scene_assets_keys)} assets as they are in the background")
