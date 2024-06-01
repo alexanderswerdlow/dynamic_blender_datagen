@@ -184,3 +184,6 @@ generated/
 singularity/.nfs*
 val_generated/
 archive/
+generated_old/
+waveletNoiseTile.bin
+active

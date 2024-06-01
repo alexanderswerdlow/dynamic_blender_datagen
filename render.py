@@ -581,6 +581,8 @@ class Blender_render:
 
             animal = np.random.choice(animal_list)
             self.animal_name = animal.split('_')[0]
+            self.args.animal_name = self.animal_name
+            self.args.save(self.args.output_dir / 'config.json')
 
         animal_list = [c for c in animal_list if self.animal_name in c]
         animal_list = sorted(animal_list, key=lambda x: os.path.getsize(os.path.join(self.animal_path, x)))[:50] # sort animal_list by file size

@@ -159,7 +159,7 @@ def train(
         args.validation = True
 
     args.num_frames = num_frames
-    args.num_assets = random.randint(5, 30)
+    args.num_assets = random.randint(5, 20)
     args.add_force = random_choice([True, False], [0.7, 0.3])
     args.fps = random.randint(4, 24)
     args.force_interval = max(args.fps * random.randint(1, 6), args.num_frames // 2)
@@ -176,7 +176,6 @@ def train(
         args.custom_scene = DATA_DIR / "blender_assets" / "hdri_plane.blend"
         args.material_path = DATA_DIR / "blender_assets" / "animal_material.blend"
         args.add_smoke = random_choice([True, False], [0.5, 0.5])
-        args.num_assets = random.randint(5, 18)
 
     if mode == "premade":
         print("Setting premade_scene")
