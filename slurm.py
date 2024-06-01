@@ -23,7 +23,7 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
-from constants import DATA_DIR, run_command
+from constants import DATA_DIR, run_command, validation_blend_files
 from export_unified import RenderArgs, render
 
 node_gpus = {
@@ -132,13 +132,28 @@ def train(
         background_hdr_path=DATA_DIR / "hdri",
     )
 
+    if existing_output_dir is not None:
+        output_dir = existing_output_dir
+    else:
+        output_dir = data_path / mode / f"{slurm_task_index}"
+        if output_dir.exists():
+            idx = 0
+            while (output_dir := data_path / mode / f"{slurm_task_index}_{idx}").exists():
+                idx += 1
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    args.output_dir = output_dir
+
     if local is False:
         args.use_singularity = True
 
     scene_dir = DATA_DIR / "scenes"
 
+    if "val" in data_path.name:
+        args.validation = True
+
     if mode == "default":
-        args.end_frame = random_choice([32, 64, 128, 256, 384], [0.5, 0.5, 0.4, 0.2, 0.1]) if end_frame is None else end_frame
+        args.end_frame = random_choice([32, 64, 128, 256, 384], [0.5, 0.5, 0.4, 0.3, 0.1]) if end_frame is None else end_frame
         args.type = "human"
         args.add_smoke = False
         args.add_fog = False
@@ -154,20 +169,22 @@ def train(
         blend_files = list(scene_dir.glob("*.blend"))
         blend_files.append(DATA_DIR / "blender_assets/hdri_plane.blend")
         blend_files.append(DATA_DIR / "demo_scene/robot.blend")
+        if args.validation:
+            blend_files = [b for b in blend_files if b.name in validation_blend_files]
         weights = [1] * len(blend_files)
-        weights[0] = len(blend_files) // 3
-        args.scene_root = random.choices(blend_files, weights)[0]
-        args.use_animal = random_choice([True, False], [0.25, 0.75])
+        weights[0] = len(blend_files) // 1.5
+        args.custom_scene = random.choices(blend_files, weights)[0]
+        args.use_animal = random_choice([True, False], [0.30, 0.70])
 
     if mode == "animal":
         args.use_animal = True
 
     if args.use_animal:
-        args.scene_root = DATA_DIR / "blender_assets" / "hdri_plane.blend"
+        args.custom_scene = DATA_DIR / "blender_assets" / "hdri_plane.blend"
         args.material_path = DATA_DIR / "blender_assets" / "animal_material.blend"
         args.add_smoke = False
 
-    is_indoor = any(s in str(args.scene_root) for s in ("blender_assets", )) is False
+    is_indoor = any(s in str(args.custom_scene) for s in ("blender_assets", )) is False
 
     if is_indoor:
         print("Setting indoor")
@@ -192,18 +209,6 @@ def train(
 
     if end_frame is not None:
         args.end_frame = end_frame
-
-    if existing_output_dir is not None:
-        output_dir = existing_output_dir
-    else:
-        output_dir = data_path / mode / f"{slurm_task_index}"
-        if output_dir.exists():
-            idx = 0
-            while (output_dir := data_path / mode / f"{slurm_task_index}_{idx}").exists():
-                idx += 1
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    args.output_dir = output_dir
 
     with open(output_dir / "slurm_metadata.txt", "w") as f:
         f.write(f"{os.getpid()} {socket.gethostname()} {device} {job_id} {addr}\n")

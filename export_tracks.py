@@ -602,7 +602,7 @@ def run_single_scene(**kwargs):
 import typer
 
 typer.main.get_command_name = lambda name: name
-app = typer.Typer(pretty_exceptions_show_locals=False)
+app = typer.Typer(pretty_exceptions_enable=False, pretty_exceptions_show_locals=False)
 
 
 def process_scene(scene, data_root, viz, profile):
@@ -613,7 +613,7 @@ def process_scene(scene, data_root, viz, profile):
 
 
 @app.command()
-def main(data_root: Path = Path("results/outdoor/0"), viz: bool = False, profile: bool = False, recursive: bool = False, num_workers: int = 10):
+def main(data_root: Path = Path("results/outdoor/0"), viz: bool = False, profile: bool = False, recursive: bool = False, num_workers: int = 2):
     print(f"Running with dir: {data_root}")
     if recursive:
         scene_list = [p.parent.relative_to(data_root) for p in data_root.rglob("scene_info.json")]
@@ -622,7 +622,12 @@ def main(data_root: Path = Path("results/outdoor/0"), viz: bool = False, profile
             futures = {
                 executor.submit(process_scene, scene, data_root, viz, profile): scene
                 for scene in scene_list
-                if ((data_root / scene / "exr_img" / "depth_00001.png").exists())  # (data_root / scene / "track_metadata.npz").exists() is False and
+                if (
+                    (data_root / scene / "exr_img" / "depth_00001.png").exists() and
+                    not (data_root / scene / "track_metadata.npz").exists() and
+                    'v5' not in str(scene) and
+                    len(list((data_root / scene / "exr_img").glob("*"))) >= 6 * len(list((data_root / scene / "exr").glob("*")))
+                )
             }
             for future in as_completed(futures):
                 scene = futures[future]

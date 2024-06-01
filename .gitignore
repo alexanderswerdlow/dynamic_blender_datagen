@@ -182,3 +182,4 @@ singularity/overlay.img
 results_large/
 generated/
 singularity/.nfs*
+val_generated/

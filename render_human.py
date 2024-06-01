@@ -1,18 +1,21 @@
-from pathlib import Path
-import numpy as np
-import json
-import os
-import math
 import argparse
-from typing import Any, Dict, Optional, Sequence, Union
-import mathutils
-import bpy
-import time
-import sys
 import glob
 import json
+import math
+import os
 import shutil
-# from export_unified import RenderArgs
+import sys
+import time
+from pathlib import Path
+from typing import Any, Dict, Optional, Sequence, Union
+
+import bpy
+import mathutils
+import numpy as np
+from tap import to_tap_class
+
+from constants import urban_scenes, validation_animals
+from export_unified import RenderTap
 
 FOCAL_LENGTH = 30
 SENSOR_WIDTH = 50
@@ -219,11 +222,13 @@ class Blender_render:
         use_animal: bool = False,
         animal_path: Optional[str] = None,
         animal_name: Optional[str] = None,
+        validation: bool = False
     ):
+        self.validation = validation
         self.background_hdr_path = None if background_hdr_path == "None" else background_hdr_path
         if self.background_hdr_path is not None:
             hdr_list = os.listdir(self.background_hdr_path)
-            hdr_list = [str(path) for path in Path(self.background_hdr_path).rglob("*") if path.suffix in [".hdr", ".exr"] and (use_animal is False or 'outdoor' in str(path))]
+            hdr_list = [str(path) for path in Path(self.background_hdr_path).rglob("*") if path.suffix in [".hdr", ".exr"] and (use_animal is False or 'outdoor' in str(path)) and (not (s in str(path)) for s in urban_scenes)]
             self.background_hdr_path = np.random.choice(hdr_list)
             print(f"Background: {self.background_hdr_path}")
 
@@ -551,18 +556,21 @@ class Blender_render:
                 aux_view_layer.cycles.pass_crypto_depth = 2
 
     def load_animal(self):
-        # load animal
         animal_list = os.listdir(self.animal_path)
         if self.animal_name is None:
+            if self.validation:
+                animal_list = [s for s in animal_list if any(x in s for x in validation_animals)]
+            else:
+                animal_list = [s for s in animal_list if not any(x in s for x in validation_animals)]
+
             animal = np.random.choice(animal_list)
             self.animal_name = animal.split('_')[0]
-        animal_list = [c for c in animal_list if self.animal_name in c]
-        # sort animal_list by file size
 
-        animal_list = sorted(animal_list, key=lambda x: os.path.getsize(os.path.join(self.animal_path, x)))[:50]
-        print(animal_list, self.animal_name)
+        animal_list = [c for c in animal_list if self.animal_name in c]
+        animal_list = sorted(animal_list, key=lambda x: os.path.getsize(os.path.join(self.animal_path, x)))[:50] # sort animal_list by file size
         animal_list = np.random.choice(animal_list, 30, replace=False if len(animal_list) > 30 else True)
 
+        print(f"Chose {animal_list}")
         print(f"Saving to {os.path.join(self.scratch_dir, 'tmp')}")
 
         animal_obj_savedir = Path(self.scratch_dir) / 'tmp'
@@ -570,6 +578,7 @@ class Blender_render:
         animal_obj_savedir = str(animal_obj_savedir)
         for animal_seq in animal_list:
             anime2obj(os.path.join(self.animal_path, animal_seq, animal_seq + '.anime'), os.path.join(animal_obj_savedir, animal_seq, 'mesh_seq'))
+
         copy_obj(animal_obj_savedir, self.animal_name, 15, os.path.join(self.scratch_dir, 'tmp', 'animal_obj'))
 
         # set the end frame according to the number of frames in the sequence
@@ -698,8 +707,13 @@ class Blender_render:
             bpy.context.object.modifiers["Fluid"].domain_settings.cache_frame_end = bpy.context.scene.frame_end
 
         if self.add_objects:
-            # add objects
-            GSO_assets = os.listdir(self.GSO_path)
+            GSO_assets = sorted(os.listdir(self.GSO_path))
+            validation_assets = GSO_assets[::50]
+            if self.validation:
+                GSO_assets = validation_assets
+            else:
+                GSO_assets = [asset for asset in GSO_assets if asset not in validation_assets]
+
             GSO_assets = [os.path.join(self.GSO_path, asset) for asset in GSO_assets]
             GSO_assets = [asset for asset in GSO_assets if os.path.isdir(asset)]
             GSO_assets_path = np.random.choice(GSO_assets, size=self.num_assets // 2, replace=False)
@@ -753,7 +767,12 @@ class Blender_render:
             print("loading partnet assets")
             print(partnet_assets)
             for j, obj_path in enumerate(partnet_assets):
-                parts = os.listdir(os.path.join(obj_path, "objs"))
+                parts = sorted(os.listdir(os.path.join(obj_path, "objs")))
+                validation_parts = parts[::50]
+                if self.validation:
+                    parts = validation_parts
+                else:
+                    parts = [p for p in parts if p not in validation_parts]
                 part_objs = []
                 for p in parts:
                     if not "obj" in p:
@@ -1438,9 +1457,8 @@ if __name__ == "__main__":
     output_dir = Path(tmp_args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    import pickle
-    with open(output_dir / 'config.pkl', 'rb') as f:
-        args = pickle.load(f)
+    args = RenderTap(description=__doc__)
+    args.load(output_dir / 'config.json')
 
     renderer = Blender_render(
         samples_per_pixel=args.samples_per_pixel,
@@ -1453,7 +1471,7 @@ if __name__ == "__main__":
         background_hdr_path=args.background_hdr_path,
         GSO_path=args.gso_root,
         num_assets=args.num_assets,
-        custom_scene=args.scene_root,
+        custom_scene=args.custom_scene,
         indoor=args.indoor,
         partnet_path=args.partnet_root,
         add_force=args.add_force,
@@ -1473,6 +1491,7 @@ if __name__ == "__main__":
         use_animal=args.use_animal,
         animal_path=args.animal_path,
         animal_name=args.animal_name,
+        validation=args.validation
     )
 
     renderer.render()

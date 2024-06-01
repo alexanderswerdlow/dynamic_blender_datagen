@@ -4,16 +4,16 @@ from dataclasses import dataclass
 from pathlib import Path
 import shutil
 from typing import Optional
-# from tap import Tap, to_tap_class
+from tap import Tap, to_tap_class
 from constants import DATA_DIR, run_command
 import dataclasses
 
 @dataclass
 class RenderArgs():
     type: str = None
-    scene_dir: Path = DATA_DIR / 'demo_scene' / 'robot.blend'
     output_dir: Path = Path('results') / 'robot_demo'
     use_singularity: bool = False
+    validation: bool = False
 
     # rendering settings
     rendering: bool = False
@@ -41,14 +41,12 @@ class RenderArgs():
 
     # export tracking settings
     export_tracking: bool = False
-    sampling_scene_points: int = 20000
-    sampling_character_num: int = 5000
 
     # Human
     sampling_points: int = 5000
     character_root: Path = DATA_DIR / 'robots'
     motion_root: Path = DATA_DIR / 'motions'
-    scene_root: Path = DATA_DIR / 'blender_assets' / 'hdri_plane.blend'
+    custom_scene: Path = DATA_DIR / 'blender_assets' / 'hdri_plane.blend'
     partnet_root: Path = DATA_DIR / 'partnet'
     gso_root: Path = DATA_DIR / 'GSO'
     render_engine: str = 'CYCLES'
@@ -67,21 +65,17 @@ class RenderArgs():
     use_animal: bool = False
     indoor: bool = False
 
+RenderTap = to_tap_class(RenderArgs)
+
 def render(args: RenderArgs):
     current_path = Path(os.path.dirname(os.path.realpath(__file__)))
     print(f"Render args: {args}")
     print(f"Current path: {current_path}")
     print(f"Rendering type: {args.type}")
 
-    # RenderTap = to_tap_class(RenderArgs)
-    # tap = RenderTap(description=__doc__)
-    # config_dict = dataclasses.asdict(args)
-    # args = tap.from_dict()
-    # args.save(args.output_dir / 'config.json')
-    # Pickle the args dataclass to a file
-    import pickle
-    with open(args.output_dir / 'config.pkl', 'wb') as f:
-        pickle.dump(args, f)
+    tap = RenderTap(description=__doc__)
+    args = tap.from_dict(dataclasses.asdict(args))
+    args.save(args.output_dir / 'config.json')
     
     blender_path = f'singularity run --bind {os.getcwd()}/singularity/config:/.config --nv singularity/blender.sif' if args.use_singularity else 'blender'
     rendering_script = (
@@ -102,7 +96,7 @@ def render(args: RenderArgs):
         exr_script = f"{python_path} {str(current_path / 'utils' / 'openexr_utils.py')} --data_dir {args.output_dir} --output_dir {args.output_dir}/exr_img --batch_size {args.batch_size} --frame_idx {args.frame_idx}" + postfix
         run_command(exr_script)
 
-    if args.end_frame <= 64 and args.indoor is False and args.use_animal is False:
+    if args.end_frame <= 64:
         if args.export_tracking:
             tracking_script = f"{python_path} {str(current_path / 'export_tracks.py')} --data_root {args.output_dir}" + postfix
             run_command(tracking_script)
