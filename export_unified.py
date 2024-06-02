@@ -114,8 +114,12 @@ def render(args: RenderArgs):
         exr_script = f"{python_path} {str(current_path / 'utils' / 'openexr_utils.py')} --output_dir {args.output_dir}" + postfix
         run_command(exr_script)
 
+    if args.remove_temporary_files:
+        remove_file_or_folder(args.output_dir / 'exr')
+        remove_file_or_folder(args.output_dir / 'tmp', raise_error=False)
+        remove_file_or_folder(args.output_dir / 'scene.blend1', raise_error=False)
 
-    if args.export_tracking:
+    if args.export_tracking and args.num_frames <= 128:
         tracking_script = f"{python_path} {str(current_path / 'export_tracks.py')} --output_dir {args.output_dir}" + postfix
         run_command(tracking_script)
 
@@ -123,10 +127,7 @@ def render(args: RenderArgs):
         remove_file_or_folder(args.output_dir / 'exr_img')
         remove_file_or_folder(args.output_dir / 'images')
         remove_file_or_folder(args.output_dir / 'obj')
-        remove_file_or_folder(args.output_dir / 'exr')
-        remove_file_or_folder(args.output_dir / 'tmp', raise_error=False)
         remove_file_or_folder(args.output_dir / 'scene.blend')
-        remove_file_or_folder(args.output_dir / 'scene.blend1', raise_error=False)
 
 if __name__ == '__main__':
     RenderTap = to_tap_class(RenderArgs)

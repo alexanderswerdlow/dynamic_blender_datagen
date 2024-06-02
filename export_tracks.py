@@ -12,7 +12,7 @@ import numpy as np
 import trimesh
 from einops import pack, rearrange, repeat, unpack
 from tqdm import tqdm
-from export_unified import RenderTap
+from export_unified import RenderTap, remove_file_or_folder
 
 import utils.plotting as plotting
 from utils.decoupled_utils import breakpoint_on_error
@@ -581,8 +581,7 @@ def tracking(data_root: Path, viz=False, profile=False):
 
 
 def run_single_scene(**kwargs):
-    with breakpoint_on_error():
-        tracking(**kwargs)
+    tracking(**kwargs)
 
 
 import typer
@@ -594,8 +593,13 @@ app = typer.Typer(pretty_exceptions_enable=False, pretty_exceptions_show_locals=
 def process_scene(scene, data_root, viz, profile):
     try:
         run_single_scene(data_root=data_root / scene, viz=viz, profile=profile)
+        remove_file_or_folder(data_root / 'exr_img')
+        remove_file_or_folder(data_root / 'images')
+        remove_file_or_folder(data_root / 'obj')
+        remove_file_or_folder(data_root / 'scene.blend')
+
     except Exception as e:
-        print(f"Failed to process scene {scene}: {e}")
+        print(f"Failed to process scene {scene}")
 
 
 @app.command()
@@ -610,10 +614,8 @@ def main(output_dir: Path = Path("results/outdoor/0"), viz: bool = False, profil
                 executor.submit(process_scene, scene, data_root, viz, profile): scene
                 for scene in scene_list
                 if (
-                    (data_root / scene / "exr_img" / "depth_00001.png").exists() and
-                    not (data_root / scene / "track_metadata.npz").exists() and
-                    'v5' not in str(scene) and
-                    len(list((data_root / scene / "exr_img").glob("*"))) >= 6 * len(list((data_root / scene / "exr").glob("*")))
+                    # any((data_root / scene / "exr_img").rglob("*.png")) and
+                    not (data_root / scene / "track_metadata.npz").exists()
                 )
             }
             for future in as_completed(futures):
@@ -642,3 +644,7 @@ if __name__ == "__main__":
 
 
 # singularity exec --bind /home/aswerdlo/repos/point_odyssey/singularity/config:/.config --nv singularity/blender.sif /bin/bash -c '$BLENDERPIP install typed-argument-parser'
+
+
+
+# cd /home/aswerdlo/repos/point_odyssey && singularity exec --bind /home/aswerdlo/repos/point_odyssey/singularity/config:/.config --nv singularity/blender.sif /bin/bash -c '$BLENDERPY /home/aswerdlo/repos/point_odyssey/export_tracks.py --num_workers=4 --recursive --output_dir=generated/val'

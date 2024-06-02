@@ -119,7 +119,7 @@ def train(
     print(result)
 
     if mode is None:
-        mode_probabilities = {"generated": 0.3, "generated_deformable": 0.2, "premade": 0.5}
+        mode_probabilities = {"generated": 0.3, "generated_deformable": 0.3, "premade": 0.4}
         modes = list(mode_probabilities.keys())
         probabilities = list(mode_probabilities.values())
         mode = random.choices(modes, probabilities)[0]
@@ -159,8 +159,8 @@ def train(
         args.validation = True
 
     args.num_frames = num_frames
-    args.num_assets = random.randint(5, 20)
-    args.add_force = random_choice([True, False], [0.7, 0.3])
+    args.num_assets = random.randint(3, 15)
+    args.add_force = random_choice([True, False], [0.8, 0.2])
     args.fps = random.randint(4, 24)
     args.force_interval = max(args.fps * random.randint(1, 6), args.num_frames // 2)
     args.force_step = max(random.randint(1, 5), args.fps)
@@ -267,7 +267,7 @@ def run_slurm(data_path, num_chunks, num_workers, partition, exclude: bool = Fal
         32: "16g",
         64: "24g",
         128: "32g",
-        256: "48g",
+        256: "24g",
     }
 
     slurm = Slurm(
