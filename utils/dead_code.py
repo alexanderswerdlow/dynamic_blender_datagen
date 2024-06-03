@@ -148,3 +148,10 @@
                         tracked_points[reference_frame_idx][asset_name].append(points_on_mesh)
                     else:
                         tracked_points[reference_frame_idx][asset_name] = [points_on_mesh]
+
+                        if balance_scenes and len(scene_combinations) < 256:
+                scene_combinations = random.choices(scene_combinations, k=len(scene_combinations) * 2)
+        
+            # depthpath = self.data_path / scene / "depths" / f"depth_{idx_to_str_5(im_idx)}.png"
+            # depthmap = imread_cv2(depthpath, cv2.IMREAD_UNCHANGED)
+            # depthmap = (depthmap.astype(np.float32) / 65535) * maximum_depth

@@ -7,6 +7,7 @@ from utils.decoupled_utils import breakpoint_on_error
 sys.path.insert(0, "/home/aswerdlo/repos/point_odyssey")
 
 import io
+import json
 import os
 import random
 import signal
@@ -95,6 +96,7 @@ def train(
     existing_output_dir: Optional[Path] = None,
     fast: bool = False,
     num_frames: Optional[int] = None,
+    render_premade_scenes: bool = False,
 ):
     assert num_frames is not None
     timestamp = time.time_ns() / 1_000_000_000
@@ -155,7 +157,7 @@ def train(
 
     scene_dir = DATA_DIR / "scenes"
 
-    if "val" in data_path.name:
+    if "val" in str(data_path):
         args.validation = True
 
     args.num_frames = num_frames
@@ -166,6 +168,9 @@ def train(
     args.force_step = max(random.randint(1, 5), args.fps)
     args.force_scale = random.uniform(0.1, 1.0)
     args.custom_scene = DATA_DIR / "blender_assets/hdri_plane.blend"
+
+    if render_premade_scenes:
+        mode = "premade"
 
     if mode == "generated":
         args.add_smoke = False
@@ -187,7 +192,18 @@ def train(
         args.add_force = False
         args.fps = 24
         args.add_fog = random_choice([True, False], [0.25, 0.75])
-            
+
+        if render_premade_scenes:
+            args.add_fog = False
+            chunks = json.load(open("data/tmp/scene_chunks.json", "r"))
+            chunk = chunks[str(slurm_task_index)]
+            args.start_frame = chunk["chunk_start"]
+            args.end_frame = chunk["chunk_end"]
+            args.num_frames = (chunk["chunk_end"] - chunk["chunk_start"]) + 1
+            assert args.num_frames == num_frames
+            scene = chunk["scene"]
+            args.custom_scene = DATA_DIR / "scenes" / f"{scene}.blend"
+
     if fast:
         args.samples_per_pixel = 4
         args.num_frames = 4
@@ -235,13 +251,7 @@ def tail_log_file(log_file_path, glob_str):
     for _ in range(max_retries):
         try:
             if len(list(log_file_path.glob(glob_str))) > 0:
-                try:
-                    proc = subprocess.Popen(["tail", "-f", "-n", "+1", f"{log_file_path}/{glob_str}"], stdout=subprocess.PIPE)
-                    print(["tail", "-f", "-n", "+1", f"{log_file_path}/{glob_str}"])
-                    for line in iter(proc.stdout.readline, b""):
-                        print(line.decode("utf-8"), end="")
-                except:
-                    proc.terminate()
+                run_command(f"tail -f -n +1 {log_file_path}/{glob_str}")
         except:
             print(f"Tried to glob: {log_file_path}, {glob_str}")
         finally:
@@ -250,7 +260,18 @@ def tail_log_file(log_file_path, glob_str):
     print(f"File not found: {log_file_path} after {max_retries * retry_interval} seconds...")
 
 
-def run_slurm(data_path, num_chunks, num_workers, partition, exclude: bool = False, num_frames: Optional[int] = None, exclude_large_nodes: bool = True, mode: Optional[str] = None):
+def run_slurm(
+    data_path,
+    num_chunks,
+    num_workers,
+    partition,
+    exclude: bool = False,
+    num_frames: Optional[int] = None,
+    exclude_large_nodes: bool = True,
+    mode: Optional[str] = None,
+    export_scene: Optional[Path] = None,
+    render_premade_scenes: bool = False,
+):
     print(f"Running slurm job with {num_chunks} chunks and {num_workers} workers...")
     from simple_slurm import Slurm
 
@@ -259,20 +280,25 @@ def run_slurm(data_path, num_chunks, num_workers, partition, exclude: bool = Fal
         kwargs["exclude"] = get_excluded_nodes("volta", "2080Ti")
 
     if partition == "all" and exclude_large_nodes:
-        kwargs["exclude"] = ["matrix-1-14", "matrix-1-24", "matrix-2-25", "matrix-2-29", "matrix-3-18", "matrix-3-22", "matrix-3-26", "matrix-3-28"]
+        kwargs["exclude"] = ["matrix-0-22", "matrix-1-14", "matrix-1-24", "matrix-2-25", "matrix-2-29", "matrix-3-18", "matrix-3-22", "matrix-3-26", "matrix-3-28"]
+
+    if export_scene is not None:
+        num_chunks = 1
+        num_workers = 1
+        num_frames = 64
+    elif render_premade_scenes:
+        with open(Path("data/tmp/scene_chunks.json"), "r") as f:
+            scene_chunks = json.load(f)
+        num_chunks = len(scene_chunks)
+        print(f"Running {num_chunks} chunks...")
 
     print(kwargs)
     assert num_frames is not None
-    mem_dict = {
-        32: "16g",
-        64: "24g",
-        128: "32g",
-        256: "24g",
-    }
+    mem_dict = {32: "16g", 64: "24g", 128: "24g", 256: "24g"}
 
     slurm = Slurm(
-        "--requeue=4",
-        job_name=f"blender_{data_path.name}",
+        "--requeue=10",
+        job_name=f"blender_{data_path.name}_{random.randint(0, 255):02x}",
         cpus_per_task=4,
         mem=mem_dict[max(num_frames, 32)],
         export="ALL",
@@ -288,9 +314,21 @@ def run_slurm(data_path, num_chunks, num_workers, partition, exclude: bool = Fal
         run_str += f" --num_frames={num_frames}"
     if mode is not None:
         run_str += f" --mode={mode}"
+    if export_scene is not None:
+        run_str += f" --export_scene={export_scene}"
+    if render_premade_scenes:
+        run_str += " --render_premade_scenes"
+    
+    print(run_str)
     job_id = slurm.sbatch(run_str)
     print(f"Submitted job {job_id} with {num_chunks} tasks and {num_workers} workers...")
     tail_log_file(Path(f"outputs"), f"{job_id}*")
+
+
+def export_scene_func(scene_path: Path):
+    args = RenderArgs(use_singularity=True, rendering=False, export_obj=False, export_tracking=True, exr=False, remove_temporary_files=True, output_dir=scene_path)
+    render(args)
+
 
 typer.main.get_command_name = lambda name: name
 app = typer.Typer(pretty_exceptions_show_locals=False)
@@ -309,14 +347,18 @@ def main(
     fast: bool = False,
     num_frames: Optional[int] = None,
     mode: Optional[str] = None,
+    export_scene: Optional[Path] = None,
+    render_premade_scenes: bool = False,
 ):
     if num_workers is not None:
         if num_to_process is None:
             num_to_process = num_workers * 2
-        run_slurm(data_path, num_to_process, num_workers, partition, num_frames=num_frames, mode=mode)
+        run_slurm(data_path, num_to_process, num_workers, partition, num_frames=num_frames, mode=mode, export_scene=export_scene, render_premade_scenes=render_premade_scenes)
+    elif export_scene is not None:
+        export_scene_func(export_scene)
     elif is_slurm_task:
         print(f"Running slurm task {slurm_task_index} ...")
-        train(data_path, slurm_task_index, num_frames=num_frames, mode=mode)
+        train(data_path, slurm_task_index, num_frames=num_frames, mode=mode, render_premade_scenes=render_premade_scenes)
     else:
         with breakpoint_on_error():
             train(
@@ -326,7 +368,7 @@ def main(
                 existing_output_dir=existing_output_dir,
                 fast=fast,
                 num_frames=num_frames,
-                mode=mode
+                mode=mode,
             )
 
 

@@ -64,7 +64,8 @@ class RenderArgs():
     camera_root: Path = DATA_DIR / 'camera_trajectory' / 'MannequinChallenge'
     num_assets: int = 5
     views: int = 1
-    start_frame: int = 1
+    start_frame: Optional[int] = None
+    end_frame: Optional[int] = None
 
     # Animal
     animal_path: Path = DATA_DIR / 'deformingthings4d'
@@ -92,9 +93,10 @@ def render(args: RenderArgs):
 
     tap = RenderTap(description=__doc__)
     args = tap.from_dict(dataclasses.asdict(args))
-    args.save(args.output_dir / 'config.json')
-    
-    if args.rendering:
+
+    if args.rendering:    
+        args.save(args.output_dir / 'config.json')
+        args.save(args.output_dir / 'render_config.json')
         blender_path = f'singularity run --bind {os.getcwd()}/singularity/config:/.config --nv singularity/blender.sif' if args.use_singularity else 'blender'
         rendering_script = (
             f"{blender_path} --background --python render.py -- "
@@ -114,19 +116,19 @@ def render(args: RenderArgs):
         exr_script = f"{python_path} {str(current_path / 'utils' / 'openexr_utils.py')} --output_dir {args.output_dir}" + postfix
         run_command(exr_script)
 
-    if args.remove_temporary_files:
-        remove_file_or_folder(args.output_dir / 'exr')
-        remove_file_or_folder(args.output_dir / 'tmp', raise_error=False)
-        remove_file_or_folder(args.output_dir / 'scene.blend1', raise_error=False)
-
-    if args.export_tracking and args.num_frames <= 128:
+    if args.export_tracking:
         tracking_script = f"{python_path} {str(current_path / 'export_tracks.py')} --output_dir {args.output_dir}" + postfix
         run_command(tracking_script)
 
     if args.remove_temporary_files:
+        remove_file_or_folder(args.output_dir / 'obj')
+        remove_file_or_folder(args.output_dir / 'tmp', raise_error=False)
+        remove_file_or_folder(args.output_dir / 'scene.blend1', raise_error=False)
+        
+        # Last to delete
+        remove_file_or_folder(args.output_dir / 'exr')
         remove_file_or_folder(args.output_dir / 'exr_img')
         remove_file_or_folder(args.output_dir / 'images')
-        remove_file_or_folder(args.output_dir / 'obj')
         remove_file_or_folder(args.output_dir / 'scene.blend')
 
 if __name__ == '__main__':

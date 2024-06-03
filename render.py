@@ -14,7 +14,7 @@ import mathutils
 import numpy as np
 from tap import to_tap_class
 
-from constants import urban_scenes, validation_animals
+from constants import urban_scenes, validation_animals, sky_scenes
 from export_unified import RenderTap
 
 FOCAL_LENGTH = 30
@@ -226,7 +226,6 @@ class Blender_render:
         animal_path: Optional[str] = None,
         animal_name: Optional[str] = None,
         validation: bool = False,
-        start_frame: int = 1,
         args: Any = None,
     ):
         
@@ -237,8 +236,21 @@ class Blender_render:
         self.scale_factor = scene_scale
         self.premade_scene = premade_scene
 
+        def validate_path(path):
+            if not(path.suffix in [".hdr", ".exr"]):
+                return False
+            if self.premade_scene:
+                return True
+            if 'outdoor' not in str(path):
+                return False
+            if any(s in str(path) for s in urban_scenes):
+                return False
+            if not any(s in str(path) for s in sky_scenes):
+                return False
+            return True
+
         if self.background_hdr_path is None and self.background_hdr_folder is not None:
-            hdr_list = [str(path) for path in Path(self.background_hdr_folder).rglob("*") if path.suffix in [".hdr", ".exr"] and (self.premade_scene or ('outdoor' in str(path) and not any(s in str(path) for s in urban_scenes)))]
+            hdr_list = [str(path) for path in Path(self.background_hdr_folder).rglob("*") if validate_path(path)]
             self.background_hdr_path = np.random.choice(hdr_list)
         
         print(f"Background: {self.background_hdr_path}")
@@ -276,7 +288,6 @@ class Blender_render:
         self.adaptive_sampling = adaptive_sampling  # speeds up rendering
         self.use_denoising = use_denoising  # improves the output quality
         self.samples_per_pixel = samples_per_pixel
-        self.start_frame = start_frame
 
         assert self.force_interval > 0
 
@@ -1238,8 +1249,13 @@ class Blender_render:
         )
 
         scene_start, scene_end = bpy.context.scene.frame_start, bpy.context.scene.frame_end
-        start_frame = np.random.randint(scene_start, scene_end - self.num_frames + 2)
-        end_frame = start_frame + self.num_frames - 1
+        if self.args.start_frame is not None and self.args.end_frame is not None:
+            assert self.args.start_frame + self.args.num_frames - 1 == self.args.end_frame
+            start_frame = self.args.start_frame
+            end_frame = self.args.end_frame
+        else:
+            start_frame = np.random.randint(scene_start, scene_end - self.num_frames + 2)
+            end_frame = start_frame + self.num_frames - 1
 
         bpy.context.scene.frame_start = start_frame
         bpy.context.scene.frame_end = end_frame
@@ -1529,7 +1545,6 @@ if __name__ == "__main__":
         animal_path=args.animal_path,
         animal_name=args.animal_name,
         validation=args.validation,
-        start_frame=args.start_frame,
         args=args
     )
 

@@ -242,16 +242,9 @@ def tracking(data_root: Path, viz=False, profile=False):
     max_depth_value = 1000
     min_depth_value = 0
 
-    blender_start_frame = 1
-    if (data_root / "config.json").exists():
-        args = RenderTap()
-        args.load(data_root / "config.json")
-        blender_start_frame = args.start_frame
-
+    blender_start_frame = int(Path(list(sorted(cam_root.glob("*.txt")))[0]).stem.split("_")[1])
     blender_frame_idxs = list(range(blender_start_frame, blender_start_frame + num_frames))
-
-    if blender_frame_idxs[0] != 1:
-        assert blender_frame_idxs[-1] == args.end_frame
+    print(f"Scene: {data_root}, Range: {range(blender_start_frame, blender_start_frame + num_frames)}")
 
     print(f"Copying data and intersecting reference camera rays with object meshes...", flush=True)
     for reference_frame_idx, reference_frame in tqdm(enumerate(range(1, num_frames - 1))):
@@ -404,43 +397,8 @@ def tracking(data_root: Path, viz=False, profile=False):
                     rr.Arrows3D(origins=init_ray + endpoints, vectors=camera_ray_dirs * distance_diff[..., None]),
                 )
 
-        if profile and reference_frame_idx > 32:
-            break
-
     print(f"Tracking points in other frames...", flush=True)
     tracked_points = defaultdict(dict)
-
-    if profile:
-        from viztracer import VizTracer
-
-        tracer = VizTracer(tracer_entries=2000000)
-        tracer.start()
-
-    for reference_frame_idx in tqdm(sorted(points_to_track.keys())):
-        if viz:
-            rr.set_time_sequence("frame", reference_frame_idx)
-        for asset_name in points_to_track[reference_frame_idx].keys():
-            intersection_points, intersection_points_barycentric_coordinates, index_faces, asset_pixel_coords = points_to_track[reference_frame_idx][
-                asset_name
-            ]
-
-            all_object_triangles = np.stack(
-                [loaded_meshes[target_frame_idx][asset_name].triangles for idx, target_frame_idx in enumerate(sorted(points_to_track.keys()))],
-                axis=0,
-            )
-            all_points = rearrange(all_object_triangles[:, index_faces], "b n ... -> (b n) ...")
-            all_barycentric_coords = repeat(intersection_points_barycentric_coordinates, "n c -> (b n) c", b=all_object_triangles.shape[0])
-            all_points_on_mesh = trimesh.triangles.barycentric_to_points(all_points, all_barycentric_coords)
-            all_points_on_mesh = rearrange(all_points_on_mesh, "(b n) ... -> b n ...", b=all_object_triangles.shape[0])
-            tracked_points[reference_frame_idx][asset_name] = all_points_on_mesh
-
-        if profile and reference_frame_idx > 1:
-            break
-
-    if profile:
-        tracer.stop()
-        tracer.save()
-        exit()
 
     K_data = np.stack(K_data, axis=0)
     world2cam_data = np.stack(world2cam_data, axis=0)
@@ -483,14 +441,23 @@ def tracking(data_root: Path, viz=False, profile=False):
             rr.log(f"world/depth_unproj", rr.Points3D(cur_xyz[0].reshape(-1, 3)))
 
         for asset_idx, asset_name in enumerate(points_to_track[reference_frame].keys()):
+            intersection_points, intersection_points_barycentric_coordinates, index_faces, asset_pixel_coords = points_to_track[reference_frame_idx][asset_name]
+
+            all_object_triangles = np.stack(
+                [loaded_meshes[target_frame_idx][asset_name].triangles for idx, target_frame_idx in enumerate(sorted(points_to_track.keys()))],
+                axis=0,
+            )
+            all_points = rearrange(all_object_triangles[:, index_faces], "b n ... -> (b n) ...")
+            all_barycentric_coords = repeat(intersection_points_barycentric_coordinates, "n c -> (b n) c", b=all_object_triangles.shape[0])
+            all_points_on_mesh = trimesh.triangles.barycentric_to_points(all_points, all_barycentric_coords)
+            all_points_on_mesh = rearrange(all_points_on_mesh, "(b n) ... -> b n ...", b=all_object_triangles.shape[0])
+
             _, _, _, coords = points_to_track[reference_frame][asset_name]
 
-            _data = tracked_points[reference_frame][asset_name]
-
-            if type(_data) == list:
-                pts = np.stack(_data, axis=0)
+            if type(all_points_on_mesh) == list:
+                pts = np.stack(all_points_on_mesh, axis=0)
             else:
-                pts = _data
+                pts = all_points_on_mesh
 
             if save_tracks:
                 pixel_aligned_tracks[reference_frame_idx, :, asset_idx, : tracked_points[reference_frame][asset_name][0].shape[0], :] = pts
@@ -593,13 +560,10 @@ app = typer.Typer(pretty_exceptions_enable=False, pretty_exceptions_show_locals=
 def process_scene(scene, data_root, viz, profile):
     try:
         run_single_scene(data_root=data_root / scene, viz=viz, profile=profile)
-        remove_file_or_folder(data_root / 'exr_img')
-        remove_file_or_folder(data_root / 'images')
-        remove_file_or_folder(data_root / 'obj')
-        remove_file_or_folder(data_root / 'scene.blend')
-
     except Exception as e:
-        print(f"Failed to process scene {scene}")
+        import traceback
+        traceback.print_exc()
+        print(f"Failed to process scene: {data_root / scene}")
 
 
 @app.command()
@@ -647,4 +611,6 @@ if __name__ == "__main__":
 
 
 
-# cd /home/aswerdlo/repos/point_odyssey && singularity exec --bind /home/aswerdlo/repos/point_odyssey/singularity/config:/.config --nv singularity/blender.sif /bin/bash -c '$BLENDERPY /home/aswerdlo/repos/point_odyssey/export_tracks.py --num_workers=4 --recursive --output_dir=generated/val'
+# cd /home/aswerdlo/repos/point_odyssey && singularity exec --bind /home/aswerdlo/repos/point_odyssey/singularity/config:/.config --nv singularity/blender.sif /bin/bash -c '$BLENDERPY /home/aswerdlo/repos/point_odyssey/export_tracks.py --output_dir=active/train_v1/generated/12'
+
+# singularity run --bind /home/aswerdlo/repos/point_odyssey/singularity/config:/.config --nv singularity/blender.sif --background --python /home/aswerdlo/repos/point_odyssey/scripts/find_scenes.py
