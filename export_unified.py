@@ -74,6 +74,8 @@ class RenderArgs():
     use_animal: bool = False
     premade_scene: bool = False
 
+    slurm_task_index: Optional[int] = None
+
 RenderTap = to_tap_class(RenderArgs)
 
 def remove_file_or_folder(path: Path, raise_error: bool = True):

@@ -138,7 +138,11 @@ def train(
         num_frames=512,
         batch_size=32,
         background_hdr_folder=DATA_DIR / "hdri",
+        slurm_task_index=slurm_task_index,
     )
+
+    if render_premade_scenes:
+        mode = "premade"
 
     if existing_output_dir is not None:
         output_dir = existing_output_dir
@@ -168,9 +172,6 @@ def train(
     args.force_step = max(random.randint(1, 5), args.fps)
     args.force_scale = random.uniform(0.1, 1.0)
     args.custom_scene = DATA_DIR / "blender_assets/hdri_plane.blend"
-
-    if render_premade_scenes:
-        mode = "premade"
 
     if mode == "generated":
         args.add_smoke = False
@@ -203,6 +204,7 @@ def train(
             assert args.num_frames == num_frames
             scene = chunk["scene"]
             args.custom_scene = DATA_DIR / "scenes" / f"{scene}.blend"
+            assert not any(scene in s for s in validation_blender_scenes)
 
     if fast:
         args.samples_per_pixel = 4
@@ -289,15 +291,23 @@ def run_slurm(
     elif render_premade_scenes:
         with open(Path("data/tmp/scene_chunks.json"), "r") as f:
             scene_chunks = json.load(f)
-        num_chunks = len(scene_chunks)
-        print(f"Running {num_chunks} chunks...")
+        num_chunks = min(len(scene_chunks), 1000)
+        print(f"Running {num_chunks} chunks... instead of {len(scene_chunks)}")
+
+        premade_path = Path("/home/aswerdlo/repos/point_odyssey/active/train_premade/premade")
+        indices_to_remove = set(folder.name for folder in premade_path.iterdir() if folder.is_dir())
+        range_to_render = [str(x) for x in list(range(0, 1001)) if str(x) not in indices_to_remove]
+        range_to_render = ",".join(range_to_render)
 
     print(kwargs)
     assert num_frames is not None
     mem_dict = {32: "16g", 64: "24g", 128: "24g", 256: "24g"}
 
+    run_command(f"{(Path.home() /'bin' / 'cluster-scripts' / 'onallnodes').resolve()} scripts/refresh_mounts.sh", raise_error=False)
+
+    time.sleep(120)
+
     slurm = Slurm(
-        "--requeue=10",
         job_name=f"blender_{data_path.name}_{random.randint(0, 255):02x}",
         cpus_per_task=4,
         mem=mem_dict[max(num_frames, 32)],
@@ -305,8 +315,9 @@ def run_slurm(
         gres=["gpu:1"],
         output=f"outputs/{Slurm.JOB_ARRAY_MASTER_ID}_{Slurm.JOB_ARRAY_ID}_{Slurm.JOB_ID}.out",
         time=timedelta(days=3, hours=0, minutes=0, seconds=0) if "kate" in partition else timedelta(days=0, hours=6, minutes=0, seconds=0),
-        array=f"0-{num_chunks-1}%{num_workers}",
+        array=range_to_render if render_premade_scenes else f"0-{num_chunks-1}%{num_workers}",
         partition=partition,
+        requeue='',
         **kwargs,
     )
     run_str = f"python slurm.py --data_path={data_path} --is_slurm_task --slurm_task_index=$SLURM_ARRAY_TASK_ID"
@@ -320,6 +331,7 @@ def run_slurm(
         run_str += " --render_premade_scenes"
     
     print(run_str)
+    print(slurm)
     job_id = slurm.sbatch(run_str)
     print(f"Submitted job {job_id} with {num_chunks} tasks and {num_workers} workers...")
     tail_log_file(Path(f"outputs"), f"{job_id}*")

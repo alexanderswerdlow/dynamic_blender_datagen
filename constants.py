@@ -9,7 +9,7 @@ if DATA_DIR.exists() is False:
 
 DATA_DIR = Path(os.getenv("DATA_DIR", DATA_DIR))
 
-def run_command(command):
+def run_command(command, raise_error=True):
     print(f"Running command: {command}")
     error_keywords = ("Error: Python: Traceback", "Error: Error")
     error_detected = False
@@ -22,10 +22,10 @@ def run_command(command):
                     error_detected = True
 
         return_code = proc.wait()
-        if return_code != 0:
+        if return_code != 0 and raise_error:
             raise Exception(f"Command failed: {command}")
         
-    if error_detected:
+    if error_detected and raise_error:
         raise Exception(f"Command failed: {command}")
         
 urban_scenes = [

@@ -3,6 +3,8 @@ import json
 import os
 from pathlib import Path
 
+from constants import validation_blender_scenes
+
 directory_path = Path("data/scenes")
 output_json = "scene_frames.json"
 
@@ -29,7 +31,8 @@ else:
     print(f"Scene frames saved to {output_json}")
 
 
-final_output_json = "scene_chunks.json"
+validation = False
+final_output_json = "data/tmp/scene_chunks.json"
 chunk_size = 128
 
 # Load the data from the JSON file
@@ -43,6 +46,9 @@ index = 0
 for scene_name, frames in scene_frames.items():
     start_frame = frames["start_frame"]
     end_frame = frames["end_frame"]
+
+    if any(scene_name in s for s in validation_blender_scenes):
+        continue
     
     for chunk_start in range(start_frame, end_frame, chunk_size):
         chunk_end = chunk_start + chunk_size
