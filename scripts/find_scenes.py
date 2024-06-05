@@ -6,7 +6,7 @@ from pathlib import Path
 from constants import validation_blender_scenes
 
 directory_path = Path("data/scenes")
-output_json = "scene_frames.json"
+output_json = Path("data/tmp/scene_frames.json")
 
 if os.path.exists(output_json):
     with open(output_json, "r") as f:
@@ -31,8 +31,8 @@ else:
     print(f"Scene frames saved to {output_json}")
 
 
-validation = False
-final_output_json = "data/tmp/scene_chunks.json"
+validation = True
+final_output_json = Path(f"data/tmp/scene_chunks{'_validation' if validation else ''}.json")
 chunk_size = 128
 
 # Load the data from the JSON file
@@ -42,13 +42,24 @@ with open(output_json, "r") as f:
 scene_chunks = {}
 index = 0
 
+
+def find_value_in_txt(file_path, key):
+    with open(file_path, "r") as file:
+        for line in file:
+            if line.startswith(key):
+                return eval(line.split("=")[1].strip())
+
 # Iterate through the scenes and split them into chunks
 for scene_name, frames in scene_frames.items():
     start_frame = frames["start_frame"]
     end_frame = frames["end_frame"]
 
-    if any(scene_name in s for s in validation_blender_scenes):
-        continue
+    if validation:
+        if not any(scene_name in s for s in validation_blender_scenes):
+            continue
+    else:
+        if any(scene_name in s for s in validation_blender_scenes):
+            continue
     
     for chunk_start in range(start_frame, end_frame, chunk_size):
         chunk_end = chunk_start + chunk_size
@@ -65,3 +76,5 @@ with open(final_output_json, "w") as f:
     json.dump(scene_chunks, f, indent=4)
 
 print(f"Scene chunks saved to {final_output_json}")
+
+# singularity run --bind /home/aswerdlo/repos/point_odyssey/singularity/config:/.config --nv singularity/blender.sif --background --python /home/aswerdlo/repos/point_odyssey/scripts/find_scenes.py

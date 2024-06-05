@@ -29,15 +29,6 @@ find_folders_with_metadata(Path('active'))
 find_folders_with_metadata(Path('generated'))
 
 for scene_path in scene_paths:
-    if (scene_path / 'track_metadata.npz').exists():
-        print(scene_path / 'track_metadata.npz')
-        remove_file_or_folder(scene_path / 'obj', raise_error=False)
-        remove_file_or_folder(scene_path / 'tmp', raise_error=False)
-        remove_file_or_folder(scene_path / 'exr', raise_error=False)
-        remove_file_or_folder(scene_path / 'scene.blend1', raise_error=False)
-        remove_file_or_folder(scene_path / 'scene.blend', raise_error=False)
-        
-        # remove_file_or_folder(scene_path / 'exr_img')
-        # remove_file_or_folder(scene_path / 'images')
+    fps = find_value_in_txt(data_path / scene / "slurm_metadata.txt", "fps")
         
 

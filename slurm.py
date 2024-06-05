@@ -196,7 +196,7 @@ def train(
 
         if render_premade_scenes:
             args.add_fog = False
-            chunks = json.load(open("data/tmp/scene_chunks.json", "r"))
+            chunks = json.load(open(Path(f"data/tmp/scene_chunks{'_validation' if args.validation else ''}.json"), "r")) 
             chunk = chunks[str(slurm_task_index)]
             args.start_frame = chunk["chunk_start"]
             args.end_frame = chunk["chunk_end"]
@@ -204,7 +204,10 @@ def train(
             assert args.num_frames == num_frames
             scene = chunk["scene"]
             args.custom_scene = DATA_DIR / "scenes" / f"{scene}.blend"
-            assert not any(scene in s for s in validation_blender_scenes)
+            if args.validation:
+                assert any(scene in s for s in validation_blender_scenes)
+            else:
+                assert not any(scene in s for s in validation_blender_scenes)
 
     if fast:
         args.samples_per_pixel = 4
@@ -288,24 +291,25 @@ def run_slurm(
         num_chunks = 1
         num_workers = 1
         num_frames = 64
-    elif render_premade_scenes:
-        with open(Path("data/tmp/scene_chunks.json"), "r") as f:
+
+    is_val = 'val' in str(data_path)
+    if render_premade_scenes:
+        with open(Path(f"data/tmp/scene_chunks{'_validation' if is_val else ''}.json"), "r") as f:
             scene_chunks = json.load(f)
         num_chunks = min(len(scene_chunks), 1000)
         print(f"Running {num_chunks} chunks... instead of {len(scene_chunks)}")
 
-        premade_path = Path("/home/aswerdlo/repos/point_odyssey/active/train_premade/premade")
+        premade_path = Path(f"generated/val/val_premade/premade") if is_val else Path(f"active/train_premade/premade")
         indices_to_remove = set(folder.name for folder in premade_path.iterdir() if folder.is_dir())
-        range_to_render = [str(x) for x in list(range(0, 1001)) if str(x) not in indices_to_remove]
+        range_to_render = [str(x) for x in list(range(0, num_chunks)) if str(x) not in indices_to_remove]
         range_to_render = ",".join(range_to_render)
 
     print(kwargs)
     assert num_frames is not None
     mem_dict = {32: "16g", 64: "24g", 128: "24g", 256: "24g"}
 
-    run_command(f"{(Path.home() /'bin' / 'cluster-scripts' / 'onallnodes').resolve()} scripts/refresh_mounts.sh", raise_error=False)
-
-    time.sleep(120)
+    # run_command(f"{(Path.home() /'bin' / 'cluster-scripts' / 'onallnodes').resolve()} scripts/refresh_mounts.sh", raise_error=False)
+    # time.sleep(120)
 
     slurm = Slurm(
         job_name=f"blender_{data_path.name}_{random.randint(0, 255):02x}",
@@ -386,3 +390,7 @@ def main(
 
 if __name__ == "__main__":
     app()
+
+
+# python slurm.py --data_path='active/train_premade' --num_frames=128 --num_workers=128 --render_premade_scenes
+# python slurm.py --data_path='generated/val/val_premade' --num_frames=128 --num_workers=128 --render_premade_scenes
