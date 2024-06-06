@@ -739,15 +739,24 @@ class Blender_render:
             else:
                 GSO_assets = [asset for asset in GSO_assets if asset not in validation_assets]
 
+            print(f"Validation: {self.validation}, GSO assets: {len(GSO_assets)}")
             GSO_assets = [os.path.join(self.GSO_path, asset) for asset in GSO_assets]
             GSO_assets = [asset for asset in GSO_assets if os.path.isdir(asset)]
             GSO_assets_path = np.random.choice(GSO_assets, size=self.num_assets // 2, replace=False)
-            print(GSO_assets_path, self.GSO_path)
+            print(f"GSO, {self.GSO_path}, Selected: {GSO_assets_path}")
 
             partnet_assets = os.listdir(self.partnet_path)
             partnet_assets = [os.path.join(self.partnet_path, asset) for asset in partnet_assets]
             partnet_assets = [asset for asset in partnet_assets if os.path.isdir(asset) and len(os.listdir(os.path.join(asset, "objs"))) < 15]
+            validation_partnet_assets = partnet_assets[::50]
+            if self.validation:
+                partnet_assets = validation_partnet_assets
+            else:
+                partnet_assets = [p for p in partnet_assets if p not in validation_partnet_assets]
+
+            print(f"Validation: {self.validation}, Partnet assets: {len(partnet_assets)}")
             partnet_assets = np.random.choice(partnet_assets, size=self.num_assets - len(GSO_assets_path), replace=False)
+            print(f"Partnet, {self.partnet_path}, Selected: {partnet_assets}")
 
             # generating location lists for assets, and remove the center area
             location_list = np.random.uniform(np.array([-2.5, -2.5, 0.8]), np.array([-1, -1, 2]), size=(self.num_assets * 50, 3)) * self.scale_factor
@@ -790,14 +799,9 @@ class Blender_render:
                 # bpy.ops.object.modifier_add(type='COLLISION')
             print("GSO assets loaded")
             print("loading partnet assets")
-            print(partnet_assets)
+            print('partnet', partnet_assets)
             for j, obj_path in enumerate(partnet_assets):
                 parts = sorted(os.listdir(os.path.join(obj_path, "objs")))
-                validation_parts = parts[::50]
-                if self.validation:
-                    parts = validation_parts
-                else:
-                    parts = [p for p in parts if p not in validation_parts]
                 part_objs = []
                 for p in parts:
                     if not "obj" in p:

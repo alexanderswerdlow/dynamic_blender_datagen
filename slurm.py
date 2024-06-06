@@ -121,7 +121,7 @@ def train(
     print(result)
 
     if mode is None:
-        mode_probabilities = {"generated": 0.3, "generated_deformable": 0.3, "premade": 0.4}
+        mode_probabilities = {"generated": 0.7, "generated_deformable": 0.3, "premade": 0.0}
         modes = list(mode_probabilities.keys())
         probabilities = list(mode_probabilities.values())
         mode = random.choices(modes, probabilities)[0]
@@ -209,19 +209,19 @@ def train(
             else:
                 assert not any(scene in s for s in validation_blender_scenes)
 
+            if "human_in_scene1" in args.custom_scene.name or "dancing.blend" in args.custom_scene.name or "robot.blend" in args.custom_scene.name:
+                print(f"Skipping scene: {args.custom_scene}") 
+                exit()
+
     if fast:
-        args.samples_per_pixel = 4
+        args.samples_per_pixel = 8
         args.num_frames = 4
-        args.add_force = True
-        args.force_step = 1
-        args.force_interval = 4
-        args.force_scale = 1.0
+        args.add_force = False
         args.scene_scale = 1
-        args.remove_temporary_files = True
         args.num_assets = 64
-        args.add_objects = True
-        args.add_force = True
-        args.add_fog = True
+        args.add_objects = False
+        args.add_force = False
+        args.add_fog = False
 
     if num_frames is not None:
         args.num_frames = num_frames
@@ -236,14 +236,19 @@ def train(
         for field in args.__dataclass_fields__:
             f.write(f"{field} = {getattr(args, field)}\n")
 
-    initial_log_file = Path("outputs") / f"{job_array_id}_{job_index}_{job_id}.out"
+        f.write("\n")
+        for key, value in os.environ.items():
+            f.write(f"{key} = {value}\n")
 
-    try:
-        os.symlink(initial_log_file.resolve(), output_dir / "log.out")
-    except:
-        print(f"Failed to symlink {initial_log_file} to log.out")
+    if job_id is not None:
+        initial_log_file = Path("outputs") / f"{job_array_id}_{job_index}_{job_id}.out"
 
-    render(args)
+        try:
+            os.symlink(initial_log_file.resolve(), output_dir / "log.out")
+        except:
+            print(f"Failed to symlink {initial_log_file} to log.out")
+
+    render(args, use_tmpfs=True)
     print(f"Finished rendering {output_dir}")
 
 
@@ -296,17 +301,23 @@ def run_slurm(
     if render_premade_scenes:
         with open(Path(f"data/tmp/scene_chunks{'_validation' if is_val else ''}.json"), "r") as f:
             scene_chunks = json.load(f)
-        num_chunks = min(len(scene_chunks), 1000)
+        num_chunks = len(scene_chunks)
         print(f"Running {num_chunks} chunks... instead of {len(scene_chunks)}")
 
-        premade_path = Path(f"generated/val/val_premade/premade") if is_val else Path(f"active/train_premade/premade")
+        premade_path = data_path / "premade"
+        # for folder in sorted(premade_path.iterdir()):
+        #     if folder.is_dir() and (folder / 'track_metadata.npz').exists() is False:
+        #         print(f"rm -rf {folder}")
+        #         # shutil.rmtree(folder)
+
         indices_to_remove = set(folder.name for folder in premade_path.iterdir() if folder.is_dir())
-        range_to_render = [str(x) for x in list(range(0, num_chunks)) if str(x) not in indices_to_remove]
+        range_to_render = [str(x) for x in list(range(0, min(num_chunks, 1000))) if str(x) not in indices_to_remove]
+        range_to_render = range_to_render[:1000]
         range_to_render = ",".join(range_to_render)
 
     print(kwargs)
     assert num_frames is not None
-    mem_dict = {32: "16g", 64: "24g", 128: "24g", 256: "24g"}
+    mem_dict = {32: "16g", 64: "24g", 128: "40g", 256: "30g"}
 
     # run_command(f"{(Path.home() /'bin' / 'cluster-scripts' / 'onallnodes').resolve()} scripts/refresh_mounts.sh", raise_error=False)
     # time.sleep(120)
@@ -319,7 +330,7 @@ def run_slurm(
         gres=["gpu:1"],
         output=f"outputs/{Slurm.JOB_ARRAY_MASTER_ID}_{Slurm.JOB_ARRAY_ID}_{Slurm.JOB_ID}.out",
         time=timedelta(days=3, hours=0, minutes=0, seconds=0) if "kate" in partition else timedelta(days=0, hours=6, minutes=0, seconds=0),
-        array=range_to_render if render_premade_scenes else f"0-{num_chunks-1}%{num_workers}",
+        array=range_to_render if render_premade_scenes else range(0, min(num_chunks, 1000)),
         partition=partition,
         requeue='',
         **kwargs,
@@ -343,7 +354,7 @@ def run_slurm(
 
 def export_scene_func(scene_path: Path):
     args = RenderArgs(use_singularity=True, rendering=False, export_obj=False, export_tracking=True, exr=False, remove_temporary_files=True, output_dir=scene_path)
-    render(args)
+    render(args, use_tmpfs=True)
 
 
 typer.main.get_command_name = lambda name: name
@@ -366,7 +377,7 @@ def main(
     export_scene: Optional[Path] = None,
     render_premade_scenes: bool = False,
 ):
-    if num_workers is not None:
+    if num_to_process is not None or num_workers is not None:
         if num_to_process is None:
             num_to_process = num_workers * 2
         run_slurm(data_path, num_to_process, num_workers, partition, num_frames=num_frames, mode=mode, export_scene=export_scene, render_premade_scenes=render_premade_scenes)
@@ -394,3 +405,6 @@ if __name__ == "__main__":
 
 # python slurm.py --data_path='active/train_premade' --num_frames=128 --num_workers=128 --render_premade_scenes
 # python slurm.py --data_path='generated/val/val_premade' --num_frames=128 --num_workers=128 --render_premade_scenes
+# python slurm.py --data_path='active/train_v6' --num_frames=128 --num_to_process=968
+# python slurm.py --data_path='generated/train/v6' --num_frames=128 --num_to_process=968
+# sb python scripts/check_tmp.py --gpu_count=0 --cpu_count=1 --mem=1 --partition='all' --quick
