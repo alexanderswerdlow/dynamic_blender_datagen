@@ -106,8 +106,10 @@ def render(args: RenderArgs, use_tmpfs: bool = False):
 
     required_space_gb = 24
     try:
-        tmpfs_space = get_free_space_gb(tmp_root.parent)
-        print(f"TMPFS space: {tmpfs_space}")
+        if use_tmpfs:
+            run_command("python scripts/check_tmp.py")
+            tmpfs_space = get_free_space_gb(tmp_root.parent)
+            print(f"TMPFS space: {tmpfs_space}")
         if use_tmpfs and tmp_root.parent.exists() and tmpfs_space >= required_space_gb:
             args.final_output_dir = args.output_dir
             args.output_dir = (tmp_root / args.output_dir.relative_to(args.output_dir.parent.parent.parent)).resolve()
@@ -131,6 +133,7 @@ def render(args: RenderArgs, use_tmpfs: bool = False):
 
         if args.remove_temporary_files:
             remove_file_or_folder(args.output_dir / 'tmp', raise_error=False)
+            run_command("python scripts/check_tmp.py")
 
         if args.export_obj:
             obj_script = f"{blender_path} --background --python {str(current_path / 'utils' / 'export_obj.py')} \
@@ -149,6 +152,7 @@ def render(args: RenderArgs, use_tmpfs: bool = False):
 
         if args.remove_temporary_files:
             remove_file_or_folder(args.output_dir / 'exr')
+            run_command("python scripts/check_tmp.py")
 
         if args.export_tracking:
             tracking_script = f"{python_path} {str(current_path / 'export_tracks.py')} --output_dir {args.output_dir}" + postfix

@@ -121,7 +121,7 @@ def train(
     print(result)
 
     if mode is None:
-        mode_probabilities = {"generated": 0.7, "generated_deformable": 0.3, "premade": 0.0}
+        mode_probabilities = {"generated": 1.0, "generated_deformable": 0.0, "premade": 0.0}
         modes = list(mode_probabilities.keys())
         probabilities = list(mode_probabilities.values())
         mode = random.choices(modes, probabilities)[0]
@@ -406,5 +406,6 @@ if __name__ == "__main__":
 # python slurm.py --data_path='active/train_premade' --num_frames=128 --num_workers=128 --render_premade_scenes
 # python slurm.py --data_path='generated/val/val_premade' --num_frames=128 --num_workers=128 --render_premade_scenes
 # python slurm.py --data_path='active/train_v6' --num_frames=128 --num_to_process=968
-# python slurm.py --data_path='generated/train/v6' --num_frames=128 --num_to_process=968
+# python slurm.py --data_path='generated/train/v7' --num_frames=128 --num_to_process=968
+# python slurm.py --data_path='generated/val/v2' --num_frames=128 --num_to_process=32 --mode=generated
 # sb python scripts/check_tmp.py --gpu_count=0 --cpu_count=1 --mem=1 --partition='all' --quick

@@ -187,3 +187,5 @@ archive/
 generated_old/
 waveletNoiseTile.bin
 active
+
+output_logs/
