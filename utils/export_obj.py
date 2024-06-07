@@ -17,7 +17,7 @@ parser = argparse.ArgumentParser(description="Export obj data")
 
 parser.add_argument("--scene_root", type=str, default="")
 parser.add_argument("--output_dir", type=str, metavar="PATH", default="./", help="img save dir")
-parser.add_argument("--premade_scene", type=bool, default=False)
+parser.add_argument("--premade_scene", action='store_true')
 
 args = parser.parse_args(argv)
 print("args:{0}".format(args))

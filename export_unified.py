@@ -7,6 +7,7 @@ from typing import Optional
 from tap import Tap, to_tap_class
 from constants import DATA_DIR, run_command
 import dataclasses
+from slurm_scripts.delete_incomplete_scenes import delete_incomplete_scenes
 
 @dataclass
 class RenderArgs():
@@ -36,6 +37,9 @@ class RenderArgs():
     export_flow: bool = False
     export_object_coordinates: bool = False
     add_objects: bool = True
+    object_ratio_weights: Optional[tuple[float]] = (0.8, 0.2, 0.0)
+    use_objaverse: bool = False
+    use_partnet: bool = True
 
     # exr settings
     exr: bool = False
@@ -50,6 +54,7 @@ class RenderArgs():
     export_tracking: bool = False
 
     # Human
+    use_character: bool = False
     sampling_points: int = 5000
     character_root: Path = DATA_DIR / 'robots'
     motion_root: Path = DATA_DIR / 'motions'
@@ -107,7 +112,7 @@ def render(args: RenderArgs, use_tmpfs: bool = False):
     required_space_gb = 24
     try:
         if use_tmpfs:
-            run_command("python scripts/check_tmp.py")
+            delete_incomplete_scenes(data_dir=tmp_root, dry_run=False)
             tmpfs_space = get_free_space_gb(tmp_root.parent)
             print(f"TMPFS space: {tmpfs_space}")
         if use_tmpfs and tmp_root.parent.exists() and tmpfs_space >= required_space_gb:
@@ -133,16 +138,19 @@ def render(args: RenderArgs, use_tmpfs: bool = False):
 
         if args.remove_temporary_files:
             remove_file_or_folder(args.output_dir / 'tmp', raise_error=False)
-            run_command("python scripts/check_tmp.py")
+            delete_incomplete_scenes(data_dir=tmp_root, dry_run=False)
 
         if args.export_obj:
             obj_script = f"{blender_path} --background --python {str(current_path / 'utils' / 'export_obj.py')} \
-            -- --scene_root {args.output_dir / 'scene.blend'} --output_dir {args.output_dir} --premade_scene {args.premade_scene}"
+            -- --scene_root {args.output_dir / 'scene.blend'} --output_dir {args.output_dir}"
+            if args.premade_scene:
+                obj_script += " --premade_scene"
             run_command(obj_script)
 
         if args.remove_temporary_files:
             remove_file_or_folder(args.output_dir / 'scene.blend')
             remove_file_or_folder(args.output_dir / 'scene.blend1', raise_error=False)
+            delete_incomplete_scenes(data_dir=tmp_root, dry_run=False)
 
         python_path = f"singularity exec --bind {os.getcwd()}/singularity/config:/.config --nv singularity/blender.sif /bin/bash -c '$BLENDERPY" if args.use_singularity else "python"
         postfix = "'" if args.use_singularity else ""
@@ -152,7 +160,7 @@ def render(args: RenderArgs, use_tmpfs: bool = False):
 
         if args.remove_temporary_files:
             remove_file_or_folder(args.output_dir / 'exr')
-            run_command("python scripts/check_tmp.py")
+            delete_incomplete_scenes(data_dir=tmp_root, dry_run=False)
 
         if args.export_tracking:
             tracking_script = f"{python_path} {str(current_path / 'export_tracks.py')} --output_dir {args.output_dir}" + postfix
@@ -162,6 +170,7 @@ def render(args: RenderArgs, use_tmpfs: bool = False):
             remove_file_or_folder(args.output_dir / 'obj')
             remove_file_or_folder(args.output_dir / 'exr_img')
             remove_file_or_folder(args.output_dir / 'images')
+            delete_incomplete_scenes(data_dir=tmp_root, dry_run=False)
             
         if args.final_output_dir is not None:
             dir_size = sum(f.stat().st_size for f in args.output_dir.glob('**/*') if f.is_file()) / (1024 ** 3)

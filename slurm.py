@@ -97,6 +97,8 @@ def train(
     fast: bool = False,
     num_frames: Optional[int] = None,
     render_premade_scenes: bool = False,
+    use_character: Optional[bool] = None,
+    use_objaverse: Optional[bool] = None,
 ):
     assert num_frames is not None
     timestamp = time.time_ns() / 1_000_000_000
@@ -176,6 +178,11 @@ def train(
     if mode == "generated":
         args.add_smoke = False
         args.add_fog = False
+        args.use_character = random_choice([True, False], [0.1, 0.9])
+        args.use_partnet = False
+        args.object_ratio_weights = random_choice([(0.4, 0.0, 0.6), (0.9, 0.1, 0.0)], [0.9, 0.1])
+        if args.object_ratio_weights[-1] > 0:
+            args.use_objaverse = True
 
     elif mode == "generated_deformable":
         args.use_animal = True
@@ -216,10 +223,10 @@ def train(
     if fast:
         args.samples_per_pixel = 8
         args.num_frames = 4
-        args.add_force = False
+        args.add_force = True
         args.scene_scale = 1
-        args.num_assets = 64
-        args.add_objects = False
+        args.num_assets = 2
+        args.add_objects = True
         args.add_force = False
         args.add_fog = False
 
@@ -230,7 +237,7 @@ def train(
         f.write(f"{os.getpid()} {socket.gethostname()} {device} {job_id} {addr}\n")
         slurm_env_vars = ["SLURM_JOB_ID", "SLURM_ARRAY_JOB_ID", "SLURM_ARRAY_TASK_ID", "SLURM_JOB_NODELIST", "SLURM_SUBMIT_DIR", "SLURM_CLUSTER_NAME"]
         for var in slurm_env_vars:
-            f.write(f"{var}={os.getenv(var, 'Not Set')}\n")
+            f.write(f"{var} = {os.getenv(var, 'None')}\n")
 
         f.write("\n")
         for field in args.__dataclass_fields__:
@@ -281,6 +288,7 @@ def run_slurm(
     mode: Optional[str] = None,
     export_scene: Optional[Path] = None,
     render_premade_scenes: bool = False,
+    refresh_mounts: bool = False,
 ):
     print(f"Running slurm job with {num_chunks} chunks and {num_workers} workers...")
     from simple_slurm import Slurm
@@ -305,11 +313,6 @@ def run_slurm(
         print(f"Running {num_chunks} chunks... instead of {len(scene_chunks)}")
 
         premade_path = data_path / "premade"
-        # for folder in sorted(premade_path.iterdir()):
-        #     if folder.is_dir() and (folder / 'track_metadata.npz').exists() is False:
-        #         print(f"rm -rf {folder}")
-        #         # shutil.rmtree(folder)
-
         indices_to_remove = set(folder.name for folder in premade_path.iterdir() if folder.is_dir())
         range_to_render = [str(x) for x in list(range(0, min(num_chunks, 1000))) if str(x) not in indices_to_remove]
         range_to_render = range_to_render[:1000]
@@ -317,10 +320,11 @@ def run_slurm(
 
     print(kwargs)
     assert num_frames is not None
-    mem_dict = {32: "16g", 64: "24g", 128: "40g", 256: "30g"}
+    mem_dict = {32: "16g", 64: "24g", 128: "50g", 256: "30g"}
 
-    # run_command(f"{(Path.home() /'bin' / 'cluster-scripts' / 'onallnodes').resolve()} scripts/refresh_mounts.sh", raise_error=False)
-    # time.sleep(120)
+    if refresh_mounts:
+        run_command(f"{(Path.home() /'bin' / 'cluster-scripts' / 'onallnodes').resolve()} scripts/refresh_mounts.sh", raise_error=False)
+        time.sleep(120)
 
     slurm = Slurm(
         job_name=f"blender_{data_path.name}_{random.randint(0, 255):02x}",
@@ -396,16 +400,19 @@ def main(
                 fast=fast,
                 num_frames=num_frames,
                 mode=mode,
+                use_character=False,
+                use_objaverse=True
             )
 
 
 if __name__ == "__main__":
     app()
 
-
 # python slurm.py --data_path='active/train_premade' --num_frames=128 --num_workers=128 --render_premade_scenes
 # python slurm.py --data_path='generated/val/val_premade' --num_frames=128 --num_workers=128 --render_premade_scenes
 # python slurm.py --data_path='active/train_v6' --num_frames=128 --num_to_process=968
-# python slurm.py --data_path='generated/train/v7' --num_frames=128 --num_to_process=968
+# python slurm.py --data_path='generated/train/v11' --num_frames=128 --num_to_process=968 --mode=generated
 # python slurm.py --data_path='generated/val/v2' --num_frames=128 --num_to_process=32 --mode=generated
+# python slurm.py --data_path='debug/v0' --num_frames=8 --mode=generated
+# python slurm.py --data_path='debug/v2' --num_frames=6 --mode=generated --num_to_process=4
 # sb python scripts/check_tmp.py --gpu_count=0 --cpu_count=1 --mem=1 --partition='all' --quick

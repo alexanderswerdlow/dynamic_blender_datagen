@@ -7,7 +7,7 @@ import shutil
 import sys
 import time
 from pathlib import Path
-from typing import Any, Dict, Optional, Sequence, Union
+from typing import Any, Callable, Dict, Optional, Sequence, Union
 
 import bpy
 import mathutils
@@ -15,7 +15,9 @@ import numpy as np
 from tap import to_tap_class
 
 from constants import urban_scenes, validation_animals, sky_scenes
-from export_unified import RenderTap
+from export_unified import RenderTap, RenderArgs
+from typing import Tuple
+import random
 
 FOCAL_LENGTH = 30
 SENSOR_WIDTH = 50
@@ -23,6 +25,54 @@ RESULOUTION_X = 960
 RESULOUTION_Y = 540
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+def _get_random_color() -> Tuple[float, float, float, float]:
+    """Generates a random RGB-A color.
+
+    The alpha value is always 1.
+
+    Returns:
+        Tuple[float, float, float, float]: A random RGB-A color. Each value is in the
+        range [0, 1].
+    """
+    return (random.random(), random.random(), random.random(), 1)
+
+
+def _apply_color_to_object(
+    obj: bpy.types.Object, color: Tuple[float, float, float, float]
+) -> None:
+    """Applies the given color to the object.
+
+    Args:
+        obj (bpy.types.Object): The object to apply the color to.
+        color (Tuple[float, float, float, float]): The color to apply to the object.
+
+    Returns:
+        None
+    """
+    mat = bpy.data.materials.new(name=f"RandomMaterial_{obj.name}")
+    mat.use_nodes = True
+    nodes = mat.node_tree.nodes
+    principled_bsdf = nodes.get("Principled BSDF")
+    if principled_bsdf:
+        principled_bsdf.inputs["Base Color"].default_value = color
+    obj.data.materials.append(mat)
+
+
+IMPORT_FUNCTIONS: Dict[str, Callable] = {
+    "obj": bpy.ops.import_scene.obj,
+    "glb": bpy.ops.import_scene.gltf,
+    "gltf": bpy.ops.import_scene.gltf,
+    "usd": bpy.ops.import_scene.usd,
+    "fbx": bpy.ops.import_scene.fbx,
+    "stl": bpy.ops.import_mesh.stl,
+    "usda": bpy.ops.import_scene.usda,
+    "dae": bpy.ops.wm.collada_import,
+    "ply": bpy.ops.import_mesh.ply,
+    "abc": bpy.ops.wm.alembic_import,
+    "blend": bpy.ops.wm.append,
+}
+
 
 def read_obj_file(obj_file_path):
     '''
@@ -226,10 +276,10 @@ class Blender_render:
         animal_path: Optional[str] = None,
         animal_name: Optional[str] = None,
         validation: bool = False,
-        args: Any = None,
+        args: RenderArgs = None,
     ):
         
-        self.args = args
+        self.args: RenderArgs = args
         self.validation = validation
         self.background_hdr_folder = self.args.background_hdr_folder
         self.background_hdr_path = self.args.background_hdr_path
@@ -293,18 +343,18 @@ class Blender_render:
 
         self.set_render_engine()
 
-        self.scratch_dir = scratch_dir
+        self.scratch_dir = Path(scratch_dir)
         self.GSO_path = GSO_path
         self.partnet_path = partnet_path
         self.character_path = character_path
-        self.use_character = premade_scene is False
+        self.use_character = self.args.use_character and self.premade_scene is False
         self.motion_path = motion_path
         self.GSO_path = GSO_path
         self.camera_path = camera_path
         self.motion_path = motion_path
         self.add_objects = self.args.add_objects
 
-        if self.premade_scene is False and self.use_animal is False:
+        if self.use_character:
             self.motion_datasets = [d.name for d in Path(motion_path).iterdir() if d.is_dir()]
             self.motion_speed = {"TotalCapture": 1 / 1.5, "DanceDB": 1.0, "CMU": 1.0, "MoSh": 1.0 / 1.2, "SFU": 1.0 / 1.2}
 
@@ -322,6 +372,7 @@ class Blender_render:
 
         self.obj_set = set(bpy.context.scene.objects)
         self.assets_set = []
+        self.asset_types = []
         self.gso_force = []
         self.setup_renderer()
 
@@ -676,6 +727,7 @@ class Blender_render:
         for obj in character_collection.objects:
             if not obj.hide_render and obj.name in bpy.data.objects.keys() and bpy.data.objects[obj.name].type == "MESH":
                 self.assets_set.append(obj)
+                self.asset_types.append("character")
 
         self.retarget_smplx2skeleton(bone_mapping)
 
@@ -696,6 +748,85 @@ class Blender_render:
             use_proportional_connected=False,
             use_proportional_projected=False,
         )
+
+    def download_load_objaverse_objects(self, location_list, num_objaverse_assets):
+        from utils.get_objaverse_objects import download_objects
+        save_object_dir = self.scratch_dir / "tmp" / "objaverse_objects"
+        save_object_dir.mkdir(parents=True, exist_ok=True)
+        download_objects(
+            save_object_dir=save_object_dir,
+            num_to_download=num_objaverse_assets,
+        )
+
+        obj_idx = 0
+        for object_path in save_object_dir.iterdir():
+            file_extension = object_path.suffix.split(".")[-1].lower()
+            if file_extension is None:
+                print(f"Unsupported file type: {object_path}")
+                continue
+            
+            try:
+                import_function = IMPORT_FUNCTIONS[file_extension]
+                object_path = str(object_path)
+                print(f"Importing {object_path}, with extension {file_extension}")
+                if file_extension == "blend":
+                    import_function(directory=object_path, link=False)
+                elif file_extension in {"glb", "gltf"}:
+                    import_function(filepath=object_path, merge_vertices=True)
+                else:
+                    import_function(filepath=object_path)
+
+                print(bpy.context.selected_objects[0])
+                imported_object = bpy.context.selected_objects[0]
+                if imported_object is None:
+                    print(f"Failed to import {object_path}, is of type {type(imported_object)}")
+                    continue
+                elif imported_object.data is None:
+                    print(f"Failed to import {object_path}, .data is of type {type(imported_object.data)}")
+                    continue
+
+                self.assets_set.append(imported_object)
+                self.asset_types.append("objaverse")
+                bpy.ops.object.origin_set(type="ORIGIN_GEOMETRY", center="BOUNDS")
+                
+                # randomize location and translation
+                imported_object.location = location_list[obj_idx]
+                imported_object.rotation_euler = (np.random.uniform(0, 2 * np.pi), np.random.uniform(0, 2 * np.pi), np.random.uniform(0, 2 * np.pi))
+
+                # set scale
+                dimension = np.max(imported_object.dimensions)
+                scale = np.random.uniform(1, 6) * self.scale_factor
+                if scale * dimension > 0.8 * self.scale_factor:  # max 0.8m
+                    scale = 0.8 * self.scale_factor / dimension
+                elif scale * dimension < 0.1 * self.scale_factor:
+                    scale = 0.1 * self.scale_factor / dimension
+                imported_object.scale = (scale, scale, scale)
+                bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+
+                bpy.context.view_layer.objects.active = imported_object
+                bpy.ops.rigidbody.object_add()
+                imported_object.rigid_body.type = "ACTIVE"
+                imported_object.rigid_body.collision_shape = "CONVEX_HULL"
+                imported_object.rigid_body.mass = 0.5 * scale / self.scale_factor
+                
+                # if imported_object.type == "MESH":
+                #     rand_color = _get_random_color()
+                #     _apply_color_to_object(imported_object, rand_color)
+
+            except Exception as e:
+                import traceback
+                traceback.print_exc()
+                print(f"Got error importing: {e}. Unsupported file type: {object_path}")
+                continue
+        
+            obj_idx += 1
+
+            print(f"Loaded {object_path}")
+
+            if obj_idx >= num_objaverse_assets:
+                break
+
+        return obj_idx
 
     def load_assets(self):
         if self.use_animal:
@@ -732,41 +863,93 @@ class Blender_render:
             bpy.context.object.modifiers["Fluid"].domain_settings.cache_frame_end = bpy.context.scene.frame_end
 
         if self.add_objects:
-            GSO_assets = sorted(os.listdir(self.GSO_path))
-            validation_assets = GSO_assets[::50]
-            if self.validation:
-                GSO_assets = validation_assets
-            else:
-                GSO_assets = [asset for asset in GSO_assets if asset not in validation_assets]
-
-            print(f"Validation: {self.validation}, GSO assets: {len(GSO_assets)}")
-            GSO_assets = [os.path.join(self.GSO_path, asset) for asset in GSO_assets]
-            GSO_assets = [asset for asset in GSO_assets if os.path.isdir(asset)]
-            GSO_assets_path = np.random.choice(GSO_assets, size=self.num_assets // 2, replace=False)
-            print(f"GSO, {self.GSO_path}, Selected: {GSO_assets_path}")
-
-            partnet_assets = os.listdir(self.partnet_path)
-            partnet_assets = [os.path.join(self.partnet_path, asset) for asset in partnet_assets]
-            partnet_assets = [asset for asset in partnet_assets if os.path.isdir(asset) and len(os.listdir(os.path.join(asset, "objs"))) < 15]
-            validation_partnet_assets = partnet_assets[::50]
-            if self.validation:
-                partnet_assets = validation_partnet_assets
-            else:
-                partnet_assets = [p for p in partnet_assets if p not in validation_partnet_assets]
-
-            print(f"Validation: {self.validation}, Partnet assets: {len(partnet_assets)}")
-            partnet_assets = np.random.choice(partnet_assets, size=self.num_assets - len(GSO_assets_path), replace=False)
-            print(f"Partnet, {self.partnet_path}, Selected: {partnet_assets}")
-
             # generating location lists for assets, and remove the center area
-            location_list = np.random.uniform(np.array([-2.5, -2.5, 0.8]), np.array([-1, -1, 2]), size=(self.num_assets * 50, 3)) * self.scale_factor
-            location_list = location_list * np.sign(np.random.uniform(-1, 1, size=(self.num_assets * 50, 3)))
-            location_list[:, 2] = np.abs(location_list[:, 2])
-            location_list = self.farthest_point_sampling(location_list, self.num_assets + 1)
+            def get_loc_list(size):
+                location_list_ = np.random.uniform(np.array([-2.5, -2.5, 0.8]), np.array([-1, -1, 2]), size=(size * 50, 3)) * self.scale_factor
+                location_list_ = location_list_ * np.sign(np.random.uniform(-1, 1, size=(size * 50, 3)))
+                location_list_[:, 2] = np.abs(location_list_[:, 2])
+                return self.farthest_point_sampling(location_list_, size + 1)
+
+            location_list = get_loc_list(self.num_assets)
+
+            assert len(self.args.object_ratio_weights) == 3
+            assert 1 - 1e-3 <= sum(self.args.object_ratio_weights) <= 1 + 1e-3
+            weights = self.args.object_ratio_weights
+            num_desired_gso_assets = int(round(weights[0] * self.num_assets))
+            num_desired_partnet_assets = int(round(weights[1] * self.num_assets))
+            num_desired_objaverse_assets = (self.num_assets - num_desired_gso_assets) - num_desired_partnet_assets
+
+            # Split location_list into 3 component groups of size num_desired
+            gso_locations = location_list[:num_desired_gso_assets]
+            partnet_locations = location_list[num_desired_gso_assets:num_desired_gso_assets + num_desired_partnet_assets]
+            objaverse_locations = location_list[num_desired_gso_assets + num_desired_partnet_assets:]
+
+            print(f"GSO: {gso_locations.shape}, Partnet: {partnet_locations.shape}, Objaverse: {objaverse_locations.shape}")
+
+            assert len(gso_locations) == num_desired_gso_assets
+            assert len(partnet_locations) == num_desired_partnet_assets
+            assert abs(len(objaverse_locations) - num_desired_objaverse_assets) <= 2
+
+            print(f"Weights: {weights}, GSO: {num_desired_gso_assets}, Partnet: {num_desired_partnet_assets}, Objaverse: {num_desired_objaverse_assets}")
+
+            if num_desired_objaverse_assets > 0:
+                assert self.args.use_objaverse
+
+                try:
+                    obtained_objaverse_assets = self.download_load_objaverse_objects(objaverse_locations, num_desired_objaverse_assets)
+                except Exception as e:
+                    print(f"Failed to download and load objaverse assets: {e}.")
+                    obtained_objaverse_assets = 0
+
+                print(f"Obtained objaverse assets: {obtained_objaverse_assets}")
+
+                if obtained_objaverse_assets != num_desired_objaverse_assets:
+                    num_desired_gso_assets += (num_desired_objaverse_assets - obtained_objaverse_assets)
+                    gso_locations = np.concatenate((gso_locations, get_loc_list(num_desired_objaverse_assets - obtained_objaverse_assets)))
+
+            if num_desired_gso_assets > 0:
+                GSO_assets = sorted(os.listdir(self.GSO_path))
+                validation_assets = GSO_assets[::50]
+
+                if self.validation:
+                    GSO_assets = validation_assets
+                else:
+                    GSO_assets = [asset for asset in GSO_assets if asset not in validation_assets]
+
+                print(f"Validation: {self.validation}, GSO assets: {len(GSO_assets)}")
+                GSO_assets = [os.path.join(self.GSO_path, asset) for asset in GSO_assets]
+                GSO_assets = [asset for asset in GSO_assets if os.path.isdir(asset)]
+                GSO_assets_path = np.random.choice(GSO_assets, size=num_desired_gso_assets, replace=False)
+                print(f"GSO, {self.GSO_path}, Selected: {GSO_assets_path}")
+            else:
+                GSO_assets_path = []
+                print("No GSO assets selected.")
+                
+            if num_desired_partnet_assets > 0:
+                assert self.args.use_partnet
+                assert num_desired_gso_assets > 0
+
+                partnet_assets = os.listdir(self.partnet_path)
+                partnet_assets = [os.path.join(self.partnet_path, asset) for asset in partnet_assets]
+                partnet_assets = [asset for asset in partnet_assets if os.path.isdir(asset) and len(os.listdir(os.path.join(asset, "objs"))) < 15]
+                validation_partnet_assets = partnet_assets[::50]
+                if self.validation:
+                    partnet_assets = validation_partnet_assets
+                else:
+                    partnet_assets = [p for p in partnet_assets if p not in validation_partnet_assets]
+
+                print(f"Validation: {self.validation}, Partnet assets: {len(partnet_assets)}")
+                partnet_assets = np.random.choice(partnet_assets, size=num_desired_partnet_assets, replace=False)
+                print(f"Partnet, {self.partnet_path}, Selected: {partnet_assets}")
+            else:
+                partnet_assets = []
+                print("No Partnet assets selected.")
+
             for i, asset_path in enumerate(GSO_assets_path):
                 bpy.ops.import_scene.obj(filepath=os.path.join(asset_path, "meshes", "model.obj"))
                 imported_object = bpy.context.selected_objects[0]
                 self.assets_set.append(imported_object)
+                self.asset_types.append("gso")
                 self.load_asset_texture(
                     imported_object,
                     mat_name=imported_object.data.name + "mat",
@@ -774,7 +957,7 @@ class Blender_render:
                 )
                 bpy.ops.object.origin_set(type="ORIGIN_GEOMETRY", center="BOUNDS")
                 # randomize location and translation
-                imported_object.location = location_list[i]
+                imported_object.location = gso_locations[i]
                 imported_object.rotation_euler = (np.random.uniform(0, 2 * np.pi), np.random.uniform(0, 2 * np.pi), np.random.uniform(0, 2 * np.pi))
 
                 # set scale
@@ -798,8 +981,8 @@ class Blender_render:
                 imported_object.rigid_body.mass = 0.5 * scale / self.scale_factor
                 # bpy.ops.object.modifier_add(type='COLLISION')
             print("GSO assets loaded")
-            print("loading partnet assets")
-            print('partnet', partnet_assets)
+            
+            print("Loading partnet assets")
             for j, obj_path in enumerate(partnet_assets):
                 parts = sorted(os.listdir(os.path.join(obj_path, "objs")))
                 part_objs = []
@@ -836,7 +1019,7 @@ class Blender_render:
                 bpy.ops.object.join()
                 imported_object = bpy.context.selected_objects[0]
                 # randomize location and translation
-                imported_object.location = location_list[len(GSO_assets_path) + j]
+                imported_object.location = partnet_locations[j]
                 imported_object.rotation_euler = (np.random.uniform(0, 2 * np.pi), np.random.uniform(0, 2 * np.pi), np.random.uniform(0, 2 * np.pi))
                 # random scale
                 dimension = np.max(imported_object.dimensions)
@@ -857,6 +1040,7 @@ class Blender_render:
                 imported_object.rigid_body.collision_shape = "CONVEX_HULL"
                 imported_object.rigid_body.mass = 1 * scale / self.scale_factor
                 self.assets_set.append(imported_object)
+                self.asset_types.append("partnet")
 
         # add force
         if self.add_force:
@@ -911,7 +1095,6 @@ class Blender_render:
             world.node_tree.links.new(node_env.outputs["Color"], node_background.inputs["Color"])
             world.node_tree.links.new(node_background.outputs["Background"], node_output.inputs["Surface"])
         else:
-
             world = bpy.context.scene.world
             node_env = world.node_tree.nodes["Environment Texture"]
             node_env.image = bpy.data.images.load(background_hdr_path)
@@ -1348,6 +1531,7 @@ class Blender_render:
                 scene_info["assets"] += [x.data.name for x in self.assets_set]
         else:
             scene_info["assets"] += [x.data.name for x in self.assets_set]
+            scene_info["asset_types"] = self.asset_types
 
         json.dump(scene_info, open(os.path.join(self.scratch_dir, "scene_info.json"), "w"))
 
