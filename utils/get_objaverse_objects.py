@@ -49,26 +49,30 @@ def handle_found_object(
     destination = (save_object_dir / sanitize_filename(local_path.stem)).with_suffix(local_path.suffix)
     copy2(local_path, destination)
 
-    print(f"Downloaded {local_path} to {destination} with save_uid {save_uid}.")
+    print(f"Downloaded {local_path} to {destination} with save_uid {save_uid}, {metadata}")
 
 def download_objects(
     save_object_dir: Optional[Path] = "debug",
     download_dir: Optional[str] = None,
     num_to_download: int = 8,
     should_break: bool = False,
+    should_filter: bool = True
 ) -> None:
     processes = min(multiprocessing.cpu_count(), num_to_download * 2)
 
     sources = list(downloaders.keys())
-    sources.remove('thingiverse')
+    sources.remove('smithsonian')
+    
+    sources = ['sketchfab'] #github, thingiverse, sketchfab
     
     selected_source = np.random.choice(sources)
     print(f"Using source: {selected_source}.")
 
     # get the objects to render
     objects = oxl.get_annotations()
-    objects = objects.query('fileType == "glb" or fileType == "fbx" or fileType == "usd" or fileType == "blend"')
-    objects = objects.query(f'source == "{selected_source}"')
+    if should_filter:
+        objects = objects.query('fileType == "glb" or fileType == "fbx"')
+        # objects = objects.query(f'source == "{selected_source}"')
 
     if should_break:
         breakpoint()
@@ -79,7 +83,7 @@ def download_objects(
     objects = objects.sample(n=num_to_download * 2).reset_index(drop=True)
     print(f"Downloading {len(objects)} objects.")
 
-    oxl.download_objects(
+    paths = oxl.download_objects(
         objects=objects,
         processes=processes,
         download_dir=download_dir,
@@ -90,8 +94,10 @@ def download_objects(
     )
 
     print(f"Downloaded {len(objects)} objects to {save_object_dir}.")
+    return paths
 
 
 if __name__ == "__main__":
     import fire
-    fire.Fire(download_objects)
+    paths = fire.Fire(download_objects)
+    breakpoint()

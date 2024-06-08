@@ -760,6 +760,7 @@ class Blender_render:
 
         obj_idx = 0
         for object_path in save_object_dir.iterdir():
+            print(f"Loading {object_path}")
             file_extension = object_path.suffix.split(".")[-1].lower()
             if file_extension is None:
                 print(f"Unsupported file type: {object_path}")
@@ -776,8 +777,8 @@ class Blender_render:
                 else:
                     import_function(filepath=object_path)
 
-                print(bpy.context.selected_objects[0])
                 imported_object = bpy.context.selected_objects[0]
+                object_path = Path(object_path)
                 if imported_object is None:
                     print(f"Failed to import {object_path}, is of type {type(imported_object)}")
                     continue
@@ -785,8 +786,14 @@ class Blender_render:
                     print(f"Failed to import {object_path}, .data is of type {type(imported_object.data)}")
                     continue
 
-                self.assets_set.append(imported_object)
-                self.asset_types.append("objaverse")
+                for material in imported_object.data.materials:
+                    print(f"{object_path.stem}, Material: {material.name}")
+                    if material.node_tree:
+                        for node in material.node_tree.nodes:
+                            if node.type == 'TEX_IMAGE':
+                                _filepath = Path(node.image.filepath).resolve()
+                                print(f"{object_path.stem}, Texture: {_filepath}, {_filepath.exists()}")
+
                 bpy.ops.object.origin_set(type="ORIGIN_GEOMETRY", center="BOUNDS")
                 
                 # randomize location and translation
@@ -797,9 +804,11 @@ class Blender_render:
                 dimension = np.max(imported_object.dimensions)
                 scale = np.random.uniform(1, 6) * self.scale_factor
                 if scale * dimension > 0.8 * self.scale_factor:  # max 0.8m
-                    scale = 0.8 * self.scale_factor / dimension
+                    scale = 0.4 * self.scale_factor / dimension
+                    print(f"Too big, Scale: {scale}, Dimension: {dimension}")
                 elif scale * dimension < 0.1 * self.scale_factor:
                     scale = 0.1 * self.scale_factor / dimension
+                    print(f"Too small, Scale: {scale}, Dimension: {dimension}")
                 imported_object.scale = (scale, scale, scale)
                 bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
 
@@ -808,6 +817,9 @@ class Blender_render:
                 imported_object.rigid_body.type = "ACTIVE"
                 imported_object.rigid_body.collision_shape = "CONVEX_HULL"
                 imported_object.rigid_body.mass = 0.5 * scale / self.scale_factor
+
+                self.assets_set.append(imported_object)
+                self.asset_types.append(("objaverse", file_extension + "_" + Path(object_path).stem))
                 
                 # if imported_object.type == "MESH":
                 #     rand_color = _get_random_color()
@@ -816,7 +828,7 @@ class Blender_render:
             except Exception as e:
                 import traceback
                 traceback.print_exc()
-                print(f"Got error importing: {e}. Unsupported file type: {object_path}")
+                print(f"{object_path.stem}, Got error importing: {e}. Unsupported file type: {object_path}")
                 continue
         
             obj_idx += 1
@@ -877,7 +889,11 @@ class Blender_render:
             weights = self.args.object_ratio_weights
             num_desired_gso_assets = int(round(weights[0] * self.num_assets))
             num_desired_partnet_assets = int(round(weights[1] * self.num_assets))
-            num_desired_objaverse_assets = (self.num_assets - num_desired_gso_assets) - num_desired_partnet_assets
+            if weights[2] > 0:
+                num_desired_objaverse_assets = (self.num_assets - num_desired_gso_assets) - num_desired_partnet_assets
+            else:
+                num_desired_objaverse_assets = 0
+                num_desired_gso_assets += (self.num_assets - num_desired_gso_assets) - num_desired_partnet_assets
 
             # Split location_list into 3 component groups of size num_desired
             gso_locations = location_list[:num_desired_gso_assets]
@@ -949,7 +965,7 @@ class Blender_render:
                 bpy.ops.import_scene.obj(filepath=os.path.join(asset_path, "meshes", "model.obj"))
                 imported_object = bpy.context.selected_objects[0]
                 self.assets_set.append(imported_object)
-                self.asset_types.append("gso")
+                self.asset_types.append(("gso", asset_path))
                 self.load_asset_texture(
                     imported_object,
                     mat_name=imported_object.data.name + "mat",
@@ -1040,7 +1056,7 @@ class Blender_render:
                 imported_object.rigid_body.collision_shape = "CONVEX_HULL"
                 imported_object.rigid_body.mass = 1 * scale / self.scale_factor
                 self.assets_set.append(imported_object)
-                self.asset_types.append("partnet")
+                self.asset_types.append(("partnet", Path(obj_path).stem))
 
         # add force
         if self.add_force:
@@ -1119,6 +1135,7 @@ class Blender_render:
             img_name = diffuse_tex_node.image.name
             bpy.data.images[img_name].colorspace_settings.name = "Raw"
             mat_links.new(diffuse_tex_node.outputs["Color"], mat_nodes["Principled BSDF"].inputs["Normal"])
+
         if roughness_path:
             roughness_tex_node = mat_nodes.new(type="ShaderNodeTexImage")
             roughness_tex_node.image = bpy.data.images.load(roughness_path)

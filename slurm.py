@@ -99,6 +99,8 @@ def train(
     render_premade_scenes: bool = False,
     use_character: Optional[bool] = None,
     use_objaverse: Optional[bool] = None,
+    no_use_tmpfs: bool = False,
+    no_remove_temporary_files: bool = False,
 ):
     assert num_frames is not None
     timestamp = time.time_ns() / 1_000_000_000
@@ -180,9 +182,18 @@ def train(
         args.add_fog = False
         args.use_character = random_choice([True, False], [0.1, 0.9])
         args.use_partnet = False
-        args.object_ratio_weights = random_choice([(0.4, 0.0, 0.6), (0.9, 0.1, 0.0)], [0.9, 0.1])
+        args.object_ratio_weights = random_choice([(0.7, 0.0, 0.3), (0.9, 0.1, 0.0)], [0.0, 1.0])
         if args.object_ratio_weights[-1] > 0:
             args.use_objaverse = True
+
+        if args.object_ratio_weights[-2] > 0:
+            args.use_partnet = True
+
+        if use_objaverse:
+            args.object_ratio_weights = (0.0, 0.0, 1.0)
+            args.use_objaverse = True
+            args.use_character = False
+            args.num_assets = 6
 
     elif mode == "generated_deformable":
         args.use_animal = True
@@ -233,6 +244,14 @@ def train(
     if num_frames is not None:
         args.num_frames = num_frames
 
+    if no_use_tmpfs:
+        args.use_tmpfs = False
+
+    if no_remove_temporary_files:
+        args.remove_temporary_files = False
+
+    
+
     with open(output_dir / "slurm_metadata.txt", "w") as f:
         f.write(f"{os.getpid()} {socket.gethostname()} {device} {job_id} {addr}\n")
         slurm_env_vars = ["SLURM_JOB_ID", "SLURM_ARRAY_JOB_ID", "SLURM_ARRAY_TASK_ID", "SLURM_JOB_NODELIST", "SLURM_SUBMIT_DIR", "SLURM_CLUSTER_NAME"]
@@ -255,7 +274,7 @@ def train(
         except:
             print(f"Failed to symlink {initial_log_file} to log.out")
 
-    render(args, use_tmpfs=True)
+    render(args)
     print(f"Finished rendering {output_dir}")
 
 
@@ -401,7 +420,9 @@ def main(
                 num_frames=num_frames,
                 mode=mode,
                 use_character=False,
-                use_objaverse=True
+                use_objaverse=True,
+                no_use_tmpfs=True,
+                no_remove_temporary_files=True,
             )
 
 
@@ -411,8 +432,9 @@ if __name__ == "__main__":
 # python slurm.py --data_path='active/train_premade' --num_frames=128 --num_workers=128 --render_premade_scenes
 # python slurm.py --data_path='generated/val/val_premade' --num_frames=128 --num_workers=128 --render_premade_scenes
 # python slurm.py --data_path='active/train_v6' --num_frames=128 --num_to_process=968
-# python slurm.py --data_path='generated/train/v11' --num_frames=128 --num_to_process=968 --mode=generated
+# python slurm.py --data_path='generated/train/v16' --num_frames=128 --num_to_process=968 --mode=generated
 # python slurm.py --data_path='generated/val/v2' --num_frames=128 --num_to_process=32 --mode=generated
-# python slurm.py --data_path='debug/v0' --num_frames=8 --mode=generated
-# python slurm.py --data_path='debug/v2' --num_frames=6 --mode=generated --num_to_process=4
+# python slurm.py --data_path='debug/v10' --num_frames=4 --mode=generated
+# python slurm.py --data_path='debug/v10' --num_frames=6 --mode=generated --num_to_process=4
+# python slurm.py --data_path='debug/v10' --num_frames=4 --mode=generated
 # sb python scripts/check_tmp.py --gpu_count=0 --cpu_count=1 --mem=1 --partition='all' --quick

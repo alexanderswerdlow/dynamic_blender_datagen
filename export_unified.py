@@ -78,6 +78,7 @@ class RenderArgs():
     animal_name: str = None
     use_animal: bool = False
     premade_scene: bool = False
+    use_tmpfs: bool = True
 
     slurm_task_index: Optional[int] = None
     final_output_dir: Optional[Path] = None
@@ -94,7 +95,7 @@ def remove_file_or_folder(path: Path, raise_error: bool = True):
         if raise_error:
             raise ValueError(f"Path {path} does not exist")
 
-def render(args: RenderArgs, use_tmpfs: bool = False):
+def render(args: RenderArgs):
     current_path = Path(os.path.dirname(os.path.realpath(__file__)))
     print(f"Render args: {args}")
     print(f"Current path: {current_path}")
@@ -111,18 +112,18 @@ def render(args: RenderArgs, use_tmpfs: bool = False):
 
     required_space_gb = 24
     try:
-        if use_tmpfs:
+        if args.use_tmpfs:
             delete_incomplete_scenes(data_dir=tmp_root, dry_run=False)
             tmpfs_space = get_free_space_gb(tmp_root.parent)
             print(f"TMPFS space: {tmpfs_space}")
-        if use_tmpfs and tmp_root.parent.exists() and tmpfs_space >= required_space_gb:
+        if args.use_tmpfs and tmp_root.parent.exists() and tmpfs_space >= required_space_gb:
             args.final_output_dir = args.output_dir
             args.output_dir = (tmp_root / args.output_dir.relative_to(args.output_dir.parent.parent.parent)).resolve()
             args.output_dir.parent.mkdir(parents=True, exist_ok=True)
             shutil.copytree(args.final_output_dir, args.output_dir, dirs_exist_ok=True)
             print(f"Using tmpfs for output: {args.output_dir}")
             print(f"Final output dir: {args.final_output_dir}")
-        elif use_tmpfs and tmp_root.parent.exists():
+        elif args.use_tmpfs and tmp_root.parent.exists():
             print(f"We do not have enough space on TMPFS. We need at least {required_space_gb} GB, saving directly to disk.")
 
         if args.rendering:    
