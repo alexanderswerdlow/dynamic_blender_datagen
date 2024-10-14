@@ -155,3 +155,66 @@
             # depthpath = self.data_path / scene / "depths" / f"depth_{idx_to_str_5(im_idx)}.png"
             # depthmap = imread_cv2(depthpath, cv2.IMREAD_UNCHANGED)
             # depthmap = (depthmap.astype(np.float32) / 65535) * maximum_depth
+
+                            # if use_objaverse_v1:
+                #     obj = load_obj(str(object_path), object_name, center=False, join=True)
+                #     imported_objects = find_all_objects(obj)
+                # else:
+                #     import_function = IMPORT_FUNCTIONS[file_extension]
+                #     print(f"Importing {object_path}, with extension {file_extension}")
+                #     if file_extension == "blend":
+                #         import_function(directory=str(object_path), link=False)
+                #     elif file_extension in {"glb", "gltf"}:
+                #         print(f"Found GLB")
+                #         import_function(filepath=str(object_path), merge_vertices=True)
+                #     else:
+                #         import_function(filepath=str(object_path))
+
+                #     # TODO: get active object
+
+                # if not imported_objects or len(imported_objects) == 0:
+                #     print(f"Failed to import {object_name}")
+                #     continue
+     
+                # 
+                # max_dim = 0
+                # for imported_object in imported_objects:
+                #     dimension = np.max(imported_object.dimensions)
+                #     max_dim = max(max_dim, dimension)
+                #     bpy.context.view_layer.objects.active = imported_object
+                #     imported_object.select_set(True)
+
+                # # Randomize location and translation
+                # set_origin(obj, loc=location_list[valid_count])
+                # obj.rotation_euler = rot
+
+                # dimension = max_dim
+                # if dimension > 5:
+                #     print(f"Dimension: {dimension}, skipping")
+                #     continue
+
+                # min_scale = 0.5 / dimension
+                # max_scale = 0.8 / dimension
+                # scale = np.random.uniform(min_scale, max_scale)
+
+                # print(f"Scale: {scale}, Final_scale: {scale * self.scale_factor}, Dimension: {dimension}")
+                # scale = scale * self.scale_factor
+                
+                # obj.scale = (scale, scale, scale)
+                # bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+
+                # assert len([x for x in imported_objects if x.type == "MESH"]) == 1
+                
+                # for imported_object in imported_objects:
+                #     if imported_object.type != "MESH":
+                #         continue
+
+                #     print(f"Setting {imported_object} to active")
+                #     bpy.ops.object.select_all(action="DESELECT")
+                #     bpy.context.view_layer.objects.active = imported_object
+                #     imported_object.select_set(True)
+
+                #     bpy.ops.rigidbody.object_add()
+                #     imported_object.rigid_body.type = "ACTIVE"
+                #     imported_object.rigid_body.collision_shape = "CONVEX_HULL"
+                #     imported_object.rigid_body.mass = 0.5 * scale / self.scale_factor

@@ -3,7 +3,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 import shutil
-from typing import Optional
+from typing import Callable, Optional
 from tap import Tap, to_tap_class
 from constants import DATA_DIR, run_command
 import dataclasses
@@ -95,7 +95,11 @@ def remove_file_or_folder(path: Path, raise_error: bool = True):
         if raise_error:
             raise ValueError(f"Path {path} does not exist")
 
-def render(args: RenderArgs):
+def get_free_space_gb(path: Path) -> float:
+    statvfs = os.statvfs(path)
+    return (statvfs.f_frsize * statvfs.f_bavail) / (1024 ** 3)
+    
+def render(args: RenderArgs, symlink_func: Optional[Callable] = None):
     current_path = Path(os.path.dirname(os.path.realpath(__file__)))
     print(f"Render args: {args}")
     print(f"Current path: {current_path}")
@@ -104,27 +108,26 @@ def render(args: RenderArgs):
     args = tap.from_dict(dataclasses.asdict(args))
 
     repo_dir = Path(os.path.dirname(os.path.realpath(__file__)))
-    tmp_root = Path('/dev/shm') / repo_dir.stem
-
-    def get_free_space_gb(path: Path) -> float:
-        statvfs = os.statvfs(path)
-        return (statvfs.f_frsize * statvfs.f_bavail) / (1024 ** 3)
 
     required_space_gb = 24
     try:
         if args.use_tmpfs:
+            import getpass
+            username = getpass.getuser()
+            tmp_root = Path('/dev/shm') / (repo_dir.stem + (username if username != 'aswerdlo' else ''))
             delete_incomplete_scenes(data_dir=tmp_root, dry_run=False)
             tmpfs_space = get_free_space_gb(tmp_root.parent)
             print(f"TMPFS space: {tmpfs_space}")
-        if args.use_tmpfs and tmp_root.parent.exists() and tmpfs_space >= required_space_gb:
-            args.final_output_dir = args.output_dir
-            args.output_dir = (tmp_root / args.output_dir.relative_to(args.output_dir.parent.parent.parent)).resolve()
-            args.output_dir.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copytree(args.final_output_dir, args.output_dir, dirs_exist_ok=True)
-            print(f"Using tmpfs for output: {args.output_dir}")
-            print(f"Final output dir: {args.final_output_dir}")
-        elif args.use_tmpfs and tmp_root.parent.exists():
-            print(f"We do not have enough space on TMPFS. We need at least {required_space_gb} GB, saving directly to disk.")
+
+            if tmp_root.parent.exists() and tmpfs_space >= required_space_gb:
+                args.final_output_dir = args.output_dir
+                args.output_dir = (tmp_root / args.output_dir.relative_to(args.output_dir.parent.parent.parent)).resolve()
+                args.output_dir.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copytree(args.final_output_dir, args.output_dir, dirs_exist_ok=True)
+                print(f"Using tmpfs for output: {args.output_dir}")
+                print(f"Final output dir: {args.final_output_dir}")
+            elif tmp_root.parent.exists():
+                print(f"We do not have enough space on TMPFS. We need at least {required_space_gb} GB, saving directly to disk.")
 
         if args.rendering:    
             args.save(args.output_dir / 'config.json')
@@ -185,6 +188,9 @@ def render(args: RenderArgs):
             print(f"Moving {args.output_dir} to {args.final_output_dir.parent}")
             shutil.move(str(args.output_dir), str(args.final_output_dir.parent))
             print(f"Move to final output dir: {args.final_output_dir}")
+
+            if symlink_func is not None:
+                symlink_func()
 
     except Exception as e:
         import traceback

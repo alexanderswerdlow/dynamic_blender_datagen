@@ -9,12 +9,31 @@ import objaverse
 import objaverse.xl as oxl
 from objaverse.utils import get_uid_from_str
 from objaverse.xl import downloaders
-
+import time
 
 def sanitize_filename(filename: str) -> str:
     return "".join(map_chars.get(c, c) for c in filename if c.isalnum() or map_chars.get(c, c) in (" ", "_", "-", "__"))
 
 map_chars = {"/": "__", " ": "_"}
+
+def get_objaverse_v1_objects(num_assets: int, is_validation: bool):
+    import pandas as pd
+    uids = pd.read_csv('/home/aswerdlo/repos/point_odyssey/utils/kiuisobj_v1_merged_80K.csv')
+    uids = uids.sample(frac=1, random_state=42).reset_index(drop=True)
+
+    val_size = max(1, int(0.01 * len(uids)))  # Ensure at least one item in validation set
+    if is_validation:
+        final_uids = uids.iloc[:val_size, 1]
+    else:
+        final_uids = uids.iloc[val_size:, 1]
+
+    uids = final_uids.sample(n=num_assets, replace=False, random_state=int(time.time())).astype(str).tolist()
+    
+    objects = objaverse.load_objects(
+        uids=uids,
+        download_processes=min(multiprocessing.cpu_count(), 8)
+    )
+    return list(objects.values())
 
 def handle_found_object(
     local_path: str,
@@ -63,7 +82,7 @@ def download_objects(
     sources = list(downloaders.keys())
     sources.remove('smithsonian')
     
-    sources = ['sketchfab'] #github, thingiverse, sketchfab
+    sources = ['sketchfab'] # github, thingiverse, sketchfab
     
     selected_source = np.random.choice(sources)
     print(f"Using source: {selected_source}.")
@@ -72,7 +91,7 @@ def download_objects(
     objects = oxl.get_annotations()
     if should_filter:
         objects = objects.query('fileType == "glb" or fileType == "fbx"')
-        # objects = objects.query(f'source == "{selected_source}"')
+        objects = objects.query(f'source == "{selected_source}"')
 
     if should_break:
         breakpoint()

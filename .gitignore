@@ -190,3 +190,6 @@ active
 
 output_logs/
 output*
+debug/
+*.out
+utils/kiuisobj_v1_merged_80K.csv

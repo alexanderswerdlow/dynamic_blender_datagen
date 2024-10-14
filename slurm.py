@@ -97,16 +97,13 @@ def train(
     fast: bool = False,
     num_frames: Optional[int] = None,
     render_premade_scenes: bool = False,
-    use_character: Optional[bool] = None,
-    use_objaverse: Optional[bool] = None,
-    no_use_tmpfs: bool = False,
-    no_remove_temporary_files: bool = False,
+    custom: bool = False,
 ):
     assert num_frames is not None
-    timestamp = time.time_ns() / 1_000_000_000
-    np.random.seed(int(timestamp))
-    random.seed(timestamp)
-    torch.manual_seed(timestamp)
+    # timestamp = (time.time_ns() - 1717879380129291121) / 10000
+    # np.random.seed(int(timestamp))
+    # random.seed(timestamp)
+    # torch.manual_seed(timestamp)
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     try:
@@ -169,7 +166,6 @@ def train(
         args.validation = True
 
     args.num_frames = num_frames
-    args.num_assets = random.randint(3, 15)
     args.add_force = random_choice([True, False], [0.8, 0.2])
     args.fps = random.randint(4, 24)
     args.force_interval = max(args.fps * random.randint(1, 6), args.num_frames // 2)
@@ -180,26 +176,26 @@ def train(
     if mode == "generated":
         args.add_smoke = False
         args.add_fog = False
-        args.use_character = random_choice([True, False], [0.1, 0.9])
+        args.use_character = random_choice([True, False], [0.0, 1.0])
         args.use_partnet = False
-        args.object_ratio_weights = random_choice([(0.7, 0.0, 0.3), (0.9, 0.1, 0.0)], [0.0, 1.0])
+
+        args.object_ratio_weights = random_choice([(0.1, 0.0, 0.9), (0.9, 0.1, 0.0)], [1.0, 0.0])
         if args.object_ratio_weights[-1] > 0:
             args.use_objaverse = True
 
         if args.object_ratio_weights[-2] > 0:
             args.use_partnet = True
 
-        if use_objaverse:
-            args.object_ratio_weights = (0.0, 0.0, 1.0)
-            args.use_objaverse = True
-            args.use_character = False
-            args.num_assets = 6
-
     elif mode == "generated_deformable":
         args.use_animal = True
         args.custom_scene = DATA_DIR / "blender_assets" / "hdri_plane.blend"
         args.material_path = DATA_DIR / "blender_assets" / "animal_material.blend"
         args.add_smoke = random_choice([True, False], [0.5, 0.5])
+
+    if args.use_animal or args.use_character:
+        args.num_assets = random.randint(3, 15)
+    else:
+        args.num_assets = random.randint(8, 22)
 
     if mode == "premade":
         print("Setting premade_scene")
@@ -244,13 +240,16 @@ def train(
     if num_frames is not None:
         args.num_frames = num_frames
 
-    if no_use_tmpfs:
+    if custom:
+        args.object_ratio_weights = (0.0, 0.0, 1.0)
+        args.use_objaverse = True
+        args.use_character = False
+        args.num_assets = 24
         args.use_tmpfs = False
-
-    if no_remove_temporary_files:
         args.remove_temporary_files = False
-
-    
+        args.export_obj = False
+        args.export_tracking = False
+        args.exr = False
 
     with open(output_dir / "slurm_metadata.txt", "w") as f:
         f.write(f"{os.getpid()} {socket.gethostname()} {device} {job_id} {addr}\n")
@@ -266,15 +265,24 @@ def train(
         for key, value in os.environ.items():
             f.write(f"{key} = {value}\n")
 
-    if job_id is not None:
-        initial_log_file = Path("outputs") / f"{job_array_id}_{job_index}_{job_id}.out"
+    def symlink_log():
+        if job_id is not None:
+            initial_log_file = Path("outputs") / f"{job_array_id}_{job_index}_{job_id}.out"
+            log_out_path = output_dir / "log.out"
+            if log_out_path.exists():
+                print(f"Removing {log_out_path}")
+                log_out_path.unlink()
 
-        try:
-            os.symlink(initial_log_file.resolve(), output_dir / "log.out")
-        except:
-            print(f"Failed to symlink {initial_log_file} to log.out")
+            print(f"Symlinking {initial_log_file} to {log_out_path}")
+            os.symlink(initial_log_file.resolve(), log_out_path)
+            try:
+                os.symlink(initial_log_file.resolve(), output_dir / "log.out")
+            except:
+                print(f"Failed to symlink {initial_log_file} to log.out")
 
-    render(args)
+    symlink_log()
+
+    render(args, symlink_func=symlink_log)
     print(f"Finished rendering {output_dir}")
 
 
@@ -308,6 +316,7 @@ def run_slurm(
     export_scene: Optional[Path] = None,
     render_premade_scenes: bool = False,
     refresh_mounts: bool = False,
+    wait: bool = True,
 ):
     print(f"Running slurm job with {num_chunks} chunks and {num_workers} workers...")
     from simple_slurm import Slurm
@@ -339,7 +348,7 @@ def run_slurm(
 
     print(kwargs)
     assert num_frames is not None
-    mem_dict = {32: "16g", 64: "24g", 128: "50g", 256: "30g"}
+    mem_dict = {32: "18g", 64: "48g", 128: "50g", 256: "30g"}
 
     if refresh_mounts:
         run_command(f"{(Path.home() /'bin' / 'cluster-scripts' / 'onallnodes').resolve()} scripts/refresh_mounts.sh", raise_error=False)
@@ -372,7 +381,8 @@ def run_slurm(
     print(slurm)
     job_id = slurm.sbatch(run_str)
     print(f"Submitted job {job_id} with {num_chunks} tasks and {num_workers} workers...")
-    tail_log_file(Path(f"outputs"), f"{job_id}*")
+    if wait:
+        tail_log_file(Path(f"outputs"), f"{job_id}*")
 
 
 def export_scene_func(scene_path: Path):
@@ -399,11 +409,12 @@ def main(
     mode: Optional[str] = None,
     export_scene: Optional[Path] = None,
     render_premade_scenes: bool = False,
+    wait: bool = True,
 ):
     if num_to_process is not None or num_workers is not None:
         if num_to_process is None:
             num_to_process = num_workers * 2
-        run_slurm(data_path, num_to_process, num_workers, partition, num_frames=num_frames, mode=mode, export_scene=export_scene, render_premade_scenes=render_premade_scenes)
+        run_slurm(data_path, num_to_process, num_workers, partition, num_frames=num_frames, mode=mode, export_scene=export_scene, render_premade_scenes=render_premade_scenes, wait=wait)
     elif export_scene is not None:
         export_scene_func(export_scene)
     elif is_slurm_task:
@@ -418,11 +429,8 @@ def main(
                 existing_output_dir=existing_output_dir,
                 fast=fast,
                 num_frames=num_frames,
-                mode=mode,
-                use_character=False,
-                use_objaverse=True,
-                no_use_tmpfs=True,
-                no_remove_temporary_files=True,
+                mode="generated",
+                custom=True,
             )
 
 
@@ -431,10 +439,9 @@ if __name__ == "__main__":
 
 # python slurm.py --data_path='active/train_premade' --num_frames=128 --num_workers=128 --render_premade_scenes
 # python slurm.py --data_path='generated/val/val_premade' --num_frames=128 --num_workers=128 --render_premade_scenes
-# python slurm.py --data_path='active/train_v6' --num_frames=128 --num_to_process=968
-# python slurm.py --data_path='generated/train/v16' --num_frames=128 --num_to_process=968 --mode=generated
-# python slurm.py --data_path='generated/val/v2' --num_frames=128 --num_to_process=32 --mode=generated
-# python slurm.py --data_path='debug/v10' --num_frames=4 --mode=generated
-# python slurm.py --data_path='debug/v10' --num_frames=6 --mode=generated --num_to_process=4
-# python slurm.py --data_path='debug/v10' --num_frames=4 --mode=generated
+
+# python slurm.py --data_path='/home/aswerdlo/data/point_odyssey/gen/debug/v0_ayush' --num_frames=4 --num_to_process=1
+# python slurm.py --data_path='generated/train/v18' --num_frames=64 --num_to_process=999 --mode=generated
+# python slurm.py --data_path='/home/aswerdlo/data/point_odyssey/gen/train/v0_gso' --num_frames=64 --num_to_process=999 --mode=generated
 # sb python scripts/check_tmp.py --gpu_count=0 --cpu_count=1 --mem=1 --partition='all' --quick
+# python slurm.py --data_path='generated/val/v3' --num_frames=64 --num_to_process=999 --mode=generated --no-wait

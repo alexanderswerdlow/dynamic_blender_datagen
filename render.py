@@ -3,21 +3,21 @@ import glob
 import json
 import math
 import os
+import random
 import shutil
 import sys
 import time
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional, Sequence, Union
+from typing import Any, Callable, Dict, Optional, Sequence, Tuple, Union
 
 import bpy
 import mathutils
 import numpy as np
+from mathutils import Matrix, Vector
 from tap import to_tap_class
 
-from constants import urban_scenes, validation_animals, sky_scenes
-from export_unified import RenderTap, RenderArgs
-from typing import Tuple
-import random
+from constants import sky_scenes, urban_scenes, validation_animals
+from export_unified import RenderArgs, RenderTap
 
 FOCAL_LENGTH = 30
 SENSOR_WIDTH = 50
@@ -25,6 +25,7 @@ RESULOUTION_X = 960
 RESULOUTION_Y = 540
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
 
 def _get_random_color() -> Tuple[float, float, float, float]:
     """Generates a random RGB-A color.
@@ -38,9 +39,7 @@ def _get_random_color() -> Tuple[float, float, float, float]:
     return (random.random(), random.random(), random.random(), 1)
 
 
-def _apply_color_to_object(
-    obj: bpy.types.Object, color: Tuple[float, float, float, float]
-) -> None:
+def _apply_color_to_object(obj: bpy.types.Object, color: Tuple[float, float, float, float]) -> None:
     """Applies the given color to the object.
 
     Args:
@@ -75,11 +74,11 @@ IMPORT_FUNCTIONS: Dict[str, Callable] = {
 
 
 def read_obj_file(obj_file_path):
-    '''
+    """
     Load .obj file, return vertices, faces.
     return: vertices: N_v X 3, faces: N_f X 3
-    '''
-    obj_f = open(obj_file_path, 'r')
+    """
+    obj_f = open(obj_file_path, "r")
     lines = obj_f.readlines()
     vertices = []
     faces = []
@@ -87,38 +86,38 @@ def read_obj_file(obj_file_path):
     vt_f = []
     for ori_line in lines:
         line = ori_line.split()
-        if line[0] == 'v':
+        if line[0] == "v":
             vertices.append([float(line[1]), float(line[2]), float(line[3])])  # x, y, z
-        elif line[0] == 'f':  # Need to consider / case, // case, etc.
-            faces.append([int(line[1].split('/')[0]),
-                          int(line[2].split('/')[0]),
-                          int(line[3].split('/')[0]) \
-                          ])  # Notice! Need to reverse back when using the face since here it would be clock-wise!
+        elif line[0] == "f":  # Need to consider / case, // case, etc.
+            faces.append(
+                [int(line[1].split("/")[0]), int(line[2].split("/")[0]), int(line[3].split("/")[0])]
+            )  # Notice! Need to reverse back when using the face since here it would be clock-wise!
             # Convert face order from clockwise to counter-clockwise direction.
-            if len(line[1].split('/')) > 1:
-                vt_f.append([int(line[1].split('/')[1]),
-                           int(line[2].split('/')[1]),
-                           int(line[3].split('/')[1]) \
-                           ])
-        elif line[0] == 'vt':
+            if len(line[1].split("/")) > 1:
+                vt_f.append([int(line[1].split("/")[1]), int(line[2].split("/")[1]), int(line[3].split("/")[1])])
+        elif line[0] == "vt":
             vt.append([float(line[1]), float(line[2])])
         obj_f.close()
 
     return np.asarray(vertices), np.asarray(faces), np.asarray(vt), np.asarray(vt_f)
 
+
 def save_obj_file(obj_file_path, vertices, faces, f_idx_offset=0, vt=None, vt_f=None):
-    with open(obj_file_path, 'w') as f:
+    with open(obj_file_path, "w") as f:
         for v in vertices:
-            f.write('v %f %f %f\n' % (v[0], v[1], v[2]))
+            f.write("v %f %f %f\n" % (v[0], v[1], v[2]))
         # adding uv coordinates
         if vt is not None:
             for v in vt:
-                f.write('vt %f %f\n' % (v[0], v[1]))
+                f.write("vt %f %f\n" % (v[0], v[1]))
         for i, face in enumerate(faces):
             if vt_f is not None and i < vt_f.shape[0]:
-                f.write('f %d/%d %d/%d %d/%d\n' % (face[0] + f_idx_offset, vt_f[i][0], face[1] + f_idx_offset, vt_f[i][1], face[2] + f_idx_offset, vt_f[i][2]))
+                f.write(
+                    "f %d/%d %d/%d %d/%d\n"
+                    % (face[0] + f_idx_offset, vt_f[i][0], face[1] + f_idx_offset, vt_f[i][1], face[2] + f_idx_offset, vt_f[i][2])
+                )
             else:
-                f.write('f %d %d %d\n' % (face[0] + f_idx_offset, face[1] + f_idx_offset, face[2] + f_idx_offset))
+                f.write("f %d %d %d\n" % (face[0] + f_idx_offset, face[1] + f_idx_offset, face[2] + f_idx_offset))
 
 
 def copy_obj(data_root, animal_name, num_seq, save_path):
@@ -132,43 +131,47 @@ def copy_obj(data_root, animal_name, num_seq, save_path):
     vt_f = None
     for i, animal_sequence in enumerate(animal_sequences):
         print(animal_sequence)
-        obj_list = [p for p in os.listdir(os.path.join(data_root, animal_sequence, 'mesh_seq')) if '.obj' in p]
+        obj_list = [p for p in os.listdir(os.path.join(data_root, animal_sequence, "mesh_seq")) if ".obj" in p]
         obj_list = sorted(obj_list)
         # copy obj from the left to the right timeline
         if idx == 0:
-            shutil.copy(os.path.join(data_root, animal_sequence, 'mesh_seq', obj_list[0]), os.path.join(save_path, str(idx).zfill(5) + '.obj'))
+            shutil.copy(os.path.join(data_root, animal_sequence, "mesh_seq", obj_list[0]), os.path.join(save_path, str(idx).zfill(5) + ".obj"))
             # using blender to unwrap the first obj
 
             # load obj
-            bpy.ops.import_scene.obj(filepath=os.path.join(save_path, str(idx).zfill(5) + '.obj'),
-                                     use_groups_as_vgroups=True, split_mode='OFF')
+            bpy.ops.import_scene.obj(filepath=os.path.join(save_path, str(idx).zfill(5) + ".obj"), use_groups_as_vgroups=True, split_mode="OFF")
             # select the object
             imported_object = bpy.context.selected_objects[0]
-            bpy.ops.object.select_all(action='DESELECT')
+            bpy.ops.object.select_all(action="DESELECT")
             imported_object.select_set(True)
             bpy.context.view_layer.objects.active = imported_object
 
             # edit mode
-            bpy.ops.object.mode_set(mode='EDIT')
-            bpy.ops.mesh.select_all(action='SELECT')
+            bpy.ops.object.mode_set(mode="EDIT")
+            bpy.ops.mesh.select_all(action="SELECT")
             # smart uv project the entire object
             bpy.ops.uv.smart_project(angle_limit=66, island_margin=0.02)
 
             # scale the uv
 
-
             # finish the edit mode
-            bpy.ops.mesh.select_all(action='DESELECT')
-            bpy.ops.object.mode_set(mode='OBJECT')
+            bpy.ops.mesh.select_all(action="DESELECT")
+            bpy.ops.object.mode_set(mode="OBJECT")
 
             # save the obj
-            bpy.ops.export_scene.obj(filepath=os.path.join(save_path, str(idx).zfill(5) + '.obj'), use_selection=True,
-                                     use_materials=False, use_normals=False, use_uvs=True, use_triangles=False,
-                                     keep_vertex_order=True)
+            bpy.ops.export_scene.obj(
+                filepath=os.path.join(save_path, str(idx).zfill(5) + ".obj"),
+                use_selection=True,
+                use_materials=False,
+                use_normals=False,
+                use_uvs=True,
+                use_triangles=False,
+                keep_vertex_order=True,
+            )
             # delete the object
             bpy.ops.object.delete(use_global=False)
 
-            v, f, vt, vt_f = read_obj_file(os.path.join(save_path, str(idx).zfill(5) + '.obj'))
+            v, f, vt, vt_f = read_obj_file(os.path.join(save_path, str(idx).zfill(5) + ".obj"))
             # scale vt
 
             # vt -= 0.5
@@ -176,40 +179,41 @@ def copy_obj(data_root, animal_name, num_seq, save_path):
             # vt += 0.5
 
         for obj in obj_list:
-            v, f, _, _ = read_obj_file(os.path.join(data_root, animal_sequence, 'mesh_seq', obj))
+            v, f, _, _ = read_obj_file(os.path.join(data_root, animal_sequence, "mesh_seq", obj))
 
-            save_obj_file(os.path.join(save_path, str(idx).zfill(5) + '.obj'), v, f, vt=vt, vt_f=vt_f)
+            save_obj_file(os.path.join(save_path, str(idx).zfill(5) + ".obj"), v, f, vt=vt, vt_f=vt_f)
             idx += 1
         # copy obj from the right to the left timeline
         for obj in obj_list[::-1]:
-            v, f, _, _ = read_obj_file(os.path.join(data_root, animal_sequence, 'mesh_seq', obj))
+            v, f, _, _ = read_obj_file(os.path.join(data_root, animal_sequence, "mesh_seq", obj))
 
-            save_obj_file(os.path.join(save_path, str(idx).zfill(5) + '.obj'), v, f, vt=vt, vt_f=vt_f)
+            save_obj_file(os.path.join(save_path, str(idx).zfill(5) + ".obj"), v, f, vt=vt, vt_f=vt_f)
             idx += 1
 
         if i < num_seq - 1:
             # interpolate obj
-            obj_0 = read_obj_file(os.path.join(data_root, animal_sequence, 'mesh_seq', obj_list[0]))
-            obj_list1 = [p for p in os.listdir(os.path.join(data_root, animal_sequences[i+1], 'mesh_seq')) if '.obj' in p]
+            obj_0 = read_obj_file(os.path.join(data_root, animal_sequence, "mesh_seq", obj_list[0]))
+            obj_list1 = [p for p in os.listdir(os.path.join(data_root, animal_sequences[i + 1], "mesh_seq")) if ".obj" in p]
             obj_list1 = sorted(obj_list1)
-            obj_1 = read_obj_file(os.path.join(data_root, animal_sequences[i+1], 'mesh_seq', obj_list1[0]))
+            obj_1 = read_obj_file(os.path.join(data_root, animal_sequences[i + 1], "mesh_seq", obj_list1[0]))
 
             for j in range(0, 10):
                 obj_v = (obj_0[0] * (10 - j) + obj_1[0] * j) / 10
                 obj_f = obj_0[1]
-                save_obj_file(os.path.join(save_path, str(idx).zfill(5) + '.obj'), obj_v, obj_f, vt=vt, vt_f=vt_f)
+                save_obj_file(os.path.join(save_path, str(idx).zfill(5) + ".obj"), obj_v, obj_f, vt=vt, vt_f=vt_f)
                 idx += 1
+
 
 def anime2obj(anime_path, save_path):
     print(f"Converting {anime_path} to {save_path}")
-    f = open(anime_path, 'rb')
+    f = open(anime_path, "rb")
     nf = np.fromfile(f, dtype=np.int32, count=1)[0]
     nv = np.fromfile(f, dtype=np.int32, count=1)[0]
     nt = np.fromfile(f, dtype=np.int32, count=1)[0]
     vert_data = np.fromfile(f, dtype=np.float32, count=nv * 3)
     face_data = np.fromfile(f, dtype=np.int32, count=nt * 3)
     offset_data = np.fromfile(f, dtype=np.float32, count=-1)
-    '''check data consistency'''
+    """check data consistency"""
     if len(offset_data) != (nf - 1) * nv * 3:
         raise ("data inconsistent error!", anime_path)
     vert_data = vert_data.reshape((-1, 3))
@@ -234,12 +238,198 @@ def anime2obj(anime_path, save_path):
 
     if not os.path.exists(save_path):
         os.makedirs(save_path)
-    
+
     print(f"There are {nf} frames in {anime_path}")
     for i in range(nf):
         obj_v = v_list[i]
         obj_f = face_data
-        save_obj_file(os.path.join(save_path, str(i).zfill(5) + '.obj'), obj_v, obj_f, f_idx_offset=1)
+        save_obj_file(os.path.join(save_path, str(i).zfill(5) + ".obj"), obj_v, obj_f, f_idx_offset=1)
+
+
+def find_all_objects(obj: bpy.types.Object):
+    """
+    Find all objects in the given object and its children.
+
+    Args:
+        obj (bpy.types.Object): The object.
+
+    Returns:
+        List[bpy.types.Object]: The list of objects.
+    """
+    objs = []
+    objs.append(obj)
+    for child in obj.children:
+        objs.extend(find_all_objects(child))
+    return objs
+
+
+def get_meshes(obj):
+    """
+    Get all the meshes of an object recursively.
+    """
+    meshes = []
+    if obj.type == "MESH":
+        meshes.append(obj)
+    for child in obj.children:
+        meshes.extend(get_meshes(child))
+    return meshes
+
+
+def join_objects(objs):
+    """
+    Join multiple objects into one
+
+    Args:
+        objs (list): list of objects to join
+    """
+    bpy.ops.object.select_all(action="DESELECT")
+    # select all meshes of the objects
+    meshes = []
+    for obj in objs:
+        meshes.extend(get_meshes(obj))
+    if len(meshes) == 0:
+        print("No mesh to join")
+        return
+    if len(meshes) == 1:
+        print("Only one mesh, no need to join")
+        return
+    for m in meshes:
+        # Select all mesh objects
+        m.select_set(state=True)
+        # Makes one active
+        bpy.context.view_layer.objects.active = m
+
+    bpy.ops.object.join()
+    # get the joined mesh
+    obj = bpy.context.object
+    return obj
+
+# https://github.dev/anyeZHY/PyBlend
+def load_obj(obj_root, obj_name, center=True, join=False, smart_uv=False):
+    """
+    Load obj/ply/glb file to Blender
+
+    Args:
+        obj_root (str): path to obj/ply/glb file
+        obj_name (str): name of the object, used as the name of the mesh and material
+        center (bool, optional): whether to center the object. Defaults to True.
+    """
+    if obj_root.endswith(".obj"):
+        bpy.ops.import_scene.obj(filepath=obj_root)
+    elif obj_root.endswith(".ply"):
+        bpy.ops.import_mesh.ply(filepath=obj_root)
+    elif obj_root.endswith(".glb"):
+        bpy.ops.import_scene.gltf(filepath=obj_root)
+    else:
+        raise NotImplementedError
+    bpy.context.selected_objects[0].name = obj_name
+    if bpy.context.selected_objects[0].type == "MESH":
+        bpy.context.selected_objects[0].data.name = obj_name
+    obj = bpy.data.objects[obj_name]
+
+    if join:
+        join_objects([obj])
+
+    if obj.active_material is not None:
+        obj.active_material.name = f"mat_{obj_name}"
+    bpy.context.view_layer.objects.active = obj
+    if smart_uv:
+        bpy.ops.object.mode_set(mode="EDIT")
+        bpy.ops.mesh.select_all(action="SELECT")
+        bpy.ops.uv.smart_project()
+        bpy.ops.object.mode_set(mode="OBJECT")
+    return obj
+
+
+def find_parent(obj: bpy.types.Object):
+    while obj.parent:
+        obj = obj.parent
+    return obj
+
+
+def find_all_meshes(obj: bpy.types.Object, parent=True):
+    """
+    Find all meshes in the given object and its children.
+
+    Args:
+        obj (bpy.types.Object): The object.
+
+    Returns:
+        List[bpy.types.Object]: The list of meshes.
+    """
+    if parent:
+        obj = find_parent(obj)
+    meshes = []
+    if isinstance(obj.data, bpy.types.Mesh):
+        meshes.append(obj)
+    for child in obj.children:
+        meshes.extend(find_all_meshes(child, parent=False))
+    return meshes
+
+
+def set_origin(obj: bpy.types.Object, loc=(0, 0, 0)):
+    """
+    Select the given object and set its center to the world origin.
+    """
+    bpy.ops.object.select_all(action="DESELECT")
+    obj.select_set(True)
+    bpy.ops.object.origin_set(type="ORIGIN_GEOMETRY", center="MEDIAN")
+    obj.location = loc
+
+
+def obj_bbox(obj: bpy.types.Object, ignore_matrix=False, mode="minmax"):
+    """
+    Compute the bounding box of the given object.
+
+    Args:
+        obj (bpy.types.Object): The object
+        ignore_matrix (bool, optional): If True, ignore the matrix_world of the object. Defaults to False.
+        mode (str, optional): "minmax" or "box". Defaults to "minmax".
+
+    Returns:
+        Tuple[Vector, Vector]: The minimum and maximum coordinates of the bounding box.
+    """
+    if mode == "minmax":
+        bbox_min = (math.inf,) * 3
+        bbox_max = (-math.inf,) * 3
+        for obj in find_all_meshes(obj):
+            for coord in obj.bound_box:
+                coord = Vector(coord)
+                if not ignore_matrix:
+                    coord = obj.matrix_world @ coord
+                bbox_min = tuple(min(x, y) for x, y in zip(bbox_min, coord))
+                bbox_max = tuple(max(x, y) for x, y in zip(bbox_max, coord))
+        return Vector(bbox_min), Vector(bbox_max)
+    elif mode == "box":
+        # return a 8 * 3 array
+        bbox_min = (math.inf,) * 3
+        bbox_max = (-math.inf,) * 3
+        for obj in find_all_meshes(obj):
+            for coord in obj.bound_box:
+                coord = Vector(coord)
+                bbox_min = tuple(min(x, y) for x, y in zip(bbox_min, coord))
+                bbox_max = tuple(max(x, y) for x, y in zip(bbox_max, coord))
+        # canonical box
+        box = np.array(
+            [
+                [bbox_min[0], bbox_min[1], bbox_min[2]],
+                [bbox_min[0], bbox_min[1], bbox_max[2]],
+                [bbox_min[0], bbox_max[1], bbox_max[2]],
+                [bbox_min[0], bbox_max[1], bbox_min[2]],
+                [bbox_max[0], bbox_min[1], bbox_min[2]],
+                [bbox_max[0], bbox_min[1], bbox_max[2]],
+                [bbox_max[0], bbox_max[1], bbox_max[2]],
+                [bbox_max[0], bbox_max[1], bbox_min[2]],
+            ]
+        )
+        if not ignore_matrix:
+            box = np.concatenate([box, np.ones((8, 1))], axis=1)
+            box = box @ np.array(obj.matrix_world).T
+            box = box[:, :3]
+        return box
+    else:
+        raise ValueError(f"Unknown mode {mode}")
+
 
 class Blender_render:
     def __init__(
@@ -278,7 +468,7 @@ class Blender_render:
         validation: bool = False,
         args: RenderArgs = None,
     ):
-        
+
         self.args: RenderArgs = args
         self.validation = validation
         self.background_hdr_folder = self.args.background_hdr_folder
@@ -287,11 +477,11 @@ class Blender_render:
         self.premade_scene = premade_scene
 
         def validate_path(path):
-            if not(path.suffix in [".hdr", ".exr"]):
+            if not (path.suffix in [".hdr", ".exr"]):
                 return False
             if self.premade_scene:
                 return True
-            if 'outdoor' not in str(path):
+            if "outdoor" not in str(path):
                 return False
             if any(s in str(path) for s in urban_scenes):
                 return False
@@ -302,7 +492,7 @@ class Blender_render:
         if self.background_hdr_path is None and self.background_hdr_folder is not None:
             hdr_list = [str(path) for path in Path(self.background_hdr_folder).rglob("*") if validate_path(path)]
             self.background_hdr_path = np.random.choice(hdr_list)
-        
+
         print(f"Background: {self.background_hdr_path}")
         print(f"Premade: {self.premade_scene}")
 
@@ -320,7 +510,7 @@ class Blender_render:
         self.blender_scene = bpy.context.scene
         self.render_engine = render_engine
         self.use_gpu = use_gpu
-        
+
         self.force_step = force_step
         self.force_num = force_num
         self.force_scale = force_scale
@@ -383,7 +573,9 @@ class Blender_render:
         self.load_assets()
         print(f"Finished loading assets...")
 
-        self.activate_render_passes(normal=self.args.export_normals, optical_flow=self.args.export_flow, segmentation=self.args.export_segmentation, uv=self.args.export_uv)
+        self.activate_render_passes(
+            normal=self.args.export_normals, optical_flow=self.args.export_flow, segmentation=self.args.export_segmentation, uv=self.args.export_uv
+        )
         self.exr_output_node = self.set_up_exr_output_node()
 
         # self.blender_scene.render.resolution_percentage = 10
@@ -391,7 +583,7 @@ class Blender_render:
             print("loading hdr from:", self.background_hdr_path)
             self.load_background_hdr(str(self.background_hdr_path))
             self.args.background_hdr_path = self.background_hdr_path
-            self.args.save(self.scratch_dir / 'config.json')
+            self.args.save(self.scratch_dir / "config.json")
 
         if self.randomize and os.path.exists(self.material_path):
             self.randomize_scene()
@@ -408,7 +600,7 @@ class Blender_render:
         if self.use_animal:
             bpy.ops.outliner.orphans_purge()
             bpy.ops.outliner.orphans_purge(do_local_ids=True, do_recursive=True)
-            bpy.ops.file.pack_all() # pack external data
+            bpy.ops.file.pack_all()  # pack external data
 
         # save blend file
         os.makedirs(scratch_dir, exist_ok=True)
@@ -511,9 +703,9 @@ class Blender_render:
 
         # scale boundingbox object
         print(f"Cube in scene: {'Cube' in bpy.data.objects.keys()}")
-        if  "Cube" in bpy.data.objects.keys():
-            bpy.data.objects['Cube'].location *= self.scale_factor
-            bpy.data.objects['Cube'].scale *= self.scale_factor
+        if "Cube" in bpy.data.objects.keys():
+            bpy.data.objects["Cube"].location *= self.scale_factor
+            bpy.data.objects["Cube"].scale *= self.scale_factor
             # apply scale
             bpy.context.view_layer.objects.active = bpy.data.objects["Cube"]
             bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
@@ -642,34 +834,34 @@ class Blender_render:
                 animal_list = [s for s in animal_list if not any(x in s for x in validation_animals)]
 
             animal = np.random.choice(animal_list)
-            self.animal_name = animal.split('_')[0]
+            self.animal_name = animal.split("_")[0]
             self.args.animal_name = self.animal_name
-            self.args.save(self.args.output_dir / 'config.json')
+            self.args.save(self.args.output_dir / "config.json")
 
         animal_list = [c for c in animal_list if self.animal_name in c]
-        animal_list = sorted(animal_list, key=lambda x: os.path.getsize(os.path.join(self.animal_path, x)))[:50] # sort animal_list by file size
+        animal_list = sorted(animal_list, key=lambda x: os.path.getsize(os.path.join(self.animal_path, x)))[:50]  # sort animal_list by file size
         animal_list = np.random.choice(animal_list, 30, replace=False if len(animal_list) > 30 else True)
 
         print(f"Chose {self.animal_name}, {animal_list}")
         print(f"Saving to {os.path.join(self.scratch_dir, 'tmp')}")
 
-        animal_obj_savedir = Path(self.scratch_dir) / 'tmp'
+        animal_obj_savedir = Path(self.scratch_dir) / "tmp"
         animal_obj_savedir.mkdir(parents=True, exist_ok=True)
 
         for animal_seq in animal_list:
-            anime2obj(Path(self.animal_path) / animal_seq / f"{animal_seq}.anime", animal_obj_savedir / animal_seq / 'mesh_seq')
+            anime2obj(Path(self.animal_path) / animal_seq / f"{animal_seq}.anime", animal_obj_savedir / animal_seq / "mesh_seq")
 
         print(f"Saved to: {animal_obj_savedir}")
-        copy_obj(animal_obj_savedir, self.animal_name, 15, Path(self.scratch_dir) / 'tmp' / 'animal_obj')
+        copy_obj(animal_obj_savedir, self.animal_name, 15, Path(self.scratch_dir) / "tmp" / "animal_obj")
 
-        bpy.context.scene.frame_end = len(list((Path(self.scratch_dir) / 'tmp' / 'animal_obj').iterdir()))
+        bpy.context.scene.frame_end = len(list((Path(self.scratch_dir) / "tmp" / "animal_obj").iterdir()))
 
         # load mesh sequence
         seq_imp_settings = bpy.types.PropertyGroup.bl_rna_get_subclass_py("SequenceImportSettings")
-        seq_imp_settings.fileNamePrefix = bpy.props.StringProperty(name='File Name', default='0')
-        print('importing mesh sequence')
-        bpy.ops.ms.import_sequence(directory=os.path.join(self.scratch_dir, 'tmp', 'animal_obj'))
-        print('importing mesh sequence done!')
+        seq_imp_settings.fileNamePrefix = bpy.props.StringProperty(name="File Name", default="0")
+        print("importing mesh sequence")
+        bpy.ops.ms.import_sequence(directory=os.path.join(self.scratch_dir, "tmp", "animal_obj"))
+        print("importing mesh sequence done!")
         self.animal = bpy.context.selected_objects[0]
         # scale and rotate the animal
         dimension = np.max(self.animal.dimensions)
@@ -684,14 +876,14 @@ class Blender_render:
         bpy.ops.object.transform_apply(location=True, rotation=False, scale=False)
 
         # add random texture to animal
-        print('adding texture')
+        print("adding texture")
         # append materials
 
         # Tmp disable cube
         bpy.ops.wm.append(directory=os.path.join(self.material_path, "Object"), filename="Cube")
 
         try:
-            furry_material = [f for f in bpy.data.materials if 'Animal' in f.name]
+            furry_material = [f for f in bpy.data.materials if "Animal" in f.name]
             furry_material = np.random.choice(furry_material)
             self.animal.data.materials.clear()
             self.animal.data.materials.append(furry_material)
@@ -701,8 +893,8 @@ class Blender_render:
         # add physics
         bpy.context.view_layer.objects.active = self.animal
         bpy.ops.rigidbody.object_add()
-        self.animal.rigid_body.collision_shape = 'MESH'
-        self.animal.rigid_body.type = 'PASSIVE'
+        self.animal.rigid_body.collision_shape = "MESH"
+        self.animal.rigid_body.type = "PASSIVE"
         # enable animated
         self.animal.rigid_body.kinematic = True
 
@@ -732,9 +924,8 @@ class Blender_render:
         self.retarget_smplx2skeleton(bone_mapping)
 
         bpy.ops.object.select_all(action="DESELECT")
-        # select all objects in the collection
         for obj in character_collection.objects:
-            obj.select_set(True)
+            obj.select_set(True)  # select all objects in the collection and scale below.
 
         bpy.ops.transform.resize(
             value=(self.scale_factor * 1.2, self.scale_factor * 1.2, self.scale_factor * 1.2),
@@ -750,95 +941,103 @@ class Blender_render:
         )
 
     def download_load_objaverse_objects(self, location_list, num_objaverse_assets):
-        from utils.get_objaverse_objects import download_objects
-        save_object_dir = self.scratch_dir / "tmp" / "objaverse_objects"
-        save_object_dir.mkdir(parents=True, exist_ok=True)
-        download_objects(
-            save_object_dir=save_object_dir,
-            num_to_download=num_objaverse_assets,
-        )
+        use_objaverse_v1 = True
 
-        obj_idx = 0
-        for object_path in save_object_dir.iterdir():
-            print(f"Loading {object_path}")
-            file_extension = object_path.suffix.split(".")[-1].lower()
-            if file_extension is None:
-                print(f"Unsupported file type: {object_path}")
-                continue
-            
+        if use_objaverse_v1:
+            from utils.get_objaverse_objects import get_objaverse_v1_objects
+            object_paths = None
+            for i in range(5):
+                try:
+                    object_paths = get_objaverse_v1_objects(num_objaverse_assets * 2, self.validation)
+                    break
+                except Exception as e:
+                    if i == 4:
+                        import traceback
+                        traceback.print_exc()
+                    print(f"Failed to download with v1, retrying..., {e}")
+                    continue
+
+            if object_paths is None:
+                return 0
+            object_paths = [Path(p) for p in object_paths]
+        else:
+            from utils.get_objaverse_objects import download_objects
+
+            save_object_dir = self.scratch_dir / "tmp" / "objaverse_objects"
+            save_object_dir.mkdir(parents=True, exist_ok=True)
+            download_objects(save_object_dir=save_object_dir, num_to_download=num_objaverse_assets)
+            object_paths = [p for p in save_object_dir.iterdir()]
+
+        valid_count = 0
+        for obj_idx, object_path in enumerate(object_paths):
             try:
-                import_function = IMPORT_FUNCTIONS[file_extension]
-                object_path = str(object_path)
-                print(f"Importing {object_path}, with extension {file_extension}")
-                if file_extension == "blend":
-                    import_function(directory=object_path, link=False)
-                elif file_extension in {"glb", "gltf"}:
-                    import_function(filepath=object_path, merge_vertices=True)
-                else:
-                    import_function(filepath=object_path)
-
-                imported_object = bpy.context.selected_objects[0]
-                object_path = Path(object_path)
-                if imported_object is None:
-                    print(f"Failed to import {object_path}, is of type {type(imported_object)}")
-                    continue
-                elif imported_object.data is None:
-                    print(f"Failed to import {object_path}, .data is of type {type(imported_object.data)}")
+                bpy.ops.object.select_all(action="DESELECT")
+                object_name = Path(object_path).stem
+                print(f"At {obj_idx}, {valid_count}, Loading {object_path}")
+                file_extension = object_path.suffix.split(".")[-1].lower()
+                if file_extension is None:
+                    print(f"Unsupported file type: {object_path}")
                     continue
 
-                for material in imported_object.data.materials:
-                    print(f"{object_path.stem}, Material: {material.name}")
-                    if material.node_tree:
-                        for node in material.node_tree.nodes:
-                            if node.type == 'TEX_IMAGE':
-                                _filepath = Path(node.image.filepath).resolve()
-                                print(f"{object_path.stem}, Texture: {_filepath}, {_filepath.exists()}")
+                imported_object = bpy.ops.import_scene.gltf(filepath=str(object_path))
 
-                bpy.ops.object.origin_set(type="ORIGIN_GEOMETRY", center="BOUNDS")
+                # check if more than one mesh in object
+                count = 0 
+                mesh_objs = []
+                for ob in bpy.context.selected_objects:
+                    if ob.type == 'MESH':
+                        ob = ob 
+                        count += 1 
+                        mesh_objs.append(ob)
+                if count > 1: 
+                    bpy.ops.object.select_all(action='DESELECT')
+                    for obj in mesh_objs:
+                        obj.select_set(True)
+                    bpy.context.view_layer.objects.active = bpy.context.selected_objects[-1]
+                    bpy.ops.object.join()
+                    ob = bpy.context.active_object
+
+                max_dimension = max(ob.dimensions)
+                print(f"Max dimension for {object_name}: {max_dimension}")
+                if max_dimension < 0.001: # or max_dimension > 10:
+                    continue
+
+                # Calculate the scaling factor to fit the object inside a cube of size 1
+                scale_factor = (1.0 / max_dimension) * self.scale_factor
                 
-                # randomize location and translation
-                imported_object.location = location_list[obj_idx]
-                imported_object.rotation_euler = (np.random.uniform(0, 2 * np.pi), np.random.uniform(0, 2 * np.pi), np.random.uniform(0, 2 * np.pi))
+                rand_scale = np.random.uniform(0.75, 1.0)
+                print(f"Scale factor for {object_name}: {scale_factor}, Rand scale: {rand_scale}")
+                ob.scale = (scale_factor * rand_scale, scale_factor * rand_scale, scale_factor * rand_scale)
+                ob.location = location_list[valid_count]
+                ob.rotation_euler = (np.random.uniform(0, 2 * np.pi), np.random.uniform(0, 2 * np.pi), np.random.uniform(0, 2 * np.pi))
 
-                # set scale
-                dimension = np.max(imported_object.dimensions)
-                scale = np.random.uniform(1, 6) * self.scale_factor
-                if scale * dimension > 0.8 * self.scale_factor:  # max 0.8m
-                    scale = 0.4 * self.scale_factor / dimension
-                    print(f"Too big, Scale: {scale}, Dimension: {dimension}")
-                elif scale * dimension < 0.1 * self.scale_factor:
-                    scale = 0.1 * self.scale_factor / dimension
-                    print(f"Too small, Scale: {scale}, Dimension: {dimension}")
-                imported_object.scale = (scale, scale, scale)
-                bpy.ops.object.transform_apply(location=False, rotation=False, scale=True)
+                bpy.ops.rigidbody.object_add({'object': ob})
+                ob.rigid_body.type = "ACTIVE"
+                ob.rigid_body.collision_shape = 'CONVEX_HULL'
+                ob.rigid_body.use_margin = True
+                ob.rigid_body.collision_margin = 0
+                ob.rigid_body.friction = 100
+                ob.rigid_body.mass = 10
+                ob.name = object_name
+            
+                self.assets_set.append(ob)
+                self.asset_types.append(("objaverse", "glb_" + Path(object_path).stem))
 
-                bpy.context.view_layer.objects.active = imported_object
-                bpy.ops.rigidbody.object_add()
-                imported_object.rigid_body.type = "ACTIVE"
-                imported_object.rigid_body.collision_shape = "CONVEX_HULL"
-                imported_object.rigid_body.mass = 0.5 * scale / self.scale_factor
-
-                self.assets_set.append(imported_object)
-                self.asset_types.append(("objaverse", file_extension + "_" + Path(object_path).stem))
-                
-                # if imported_object.type == "MESH":
-                #     rand_color = _get_random_color()
-                #     _apply_color_to_object(imported_object, rand_color)
-
+                print(f"Successfully loaded {obj_idx}, {object_name}, {object_path}")
+                valid_count += 1
             except Exception as e:
                 import traceback
+
                 traceback.print_exc()
-                print(f"{object_path.stem}, Got error importing: {e}. Unsupported file type: {object_path}")
-                continue
-        
-            obj_idx += 1
+                print(f"{object_path.stem}, Got error importing: {e}")
 
             print(f"Loaded {object_path}")
 
-            if obj_idx >= num_objaverse_assets:
+            if valid_count >= num_objaverse_assets:
                 break
 
-        return obj_idx
+        print(f"Loaded {valid_count} objaverse objects")
+        return valid_count
 
     def load_assets(self):
         if self.use_animal:
@@ -877,7 +1076,7 @@ class Blender_render:
         if self.add_objects:
             # generating location lists for assets, and remove the center area
             def get_loc_list(size):
-                location_list_ = np.random.uniform(np.array([-2.5, -2.5, 0.8]), np.array([-1, -1, 2]), size=(size * 50, 3)) * self.scale_factor
+                location_list_ = np.random.uniform(np.array([-2.25, -2.25, 0.8]), np.array([-1, -1, 2]), size=(size * 50, 3)) * self.scale_factor
                 location_list_ = location_list_ * np.sign(np.random.uniform(-1, 1, size=(size * 50, 3)))
                 location_list_[:, 2] = np.abs(location_list_[:, 2])
                 return self.farthest_point_sampling(location_list_, size + 1)
@@ -897,8 +1096,8 @@ class Blender_render:
 
             # Split location_list into 3 component groups of size num_desired
             gso_locations = location_list[:num_desired_gso_assets]
-            partnet_locations = location_list[num_desired_gso_assets:num_desired_gso_assets + num_desired_partnet_assets]
-            objaverse_locations = location_list[num_desired_gso_assets + num_desired_partnet_assets:]
+            partnet_locations = location_list[num_desired_gso_assets : num_desired_gso_assets + num_desired_partnet_assets]
+            objaverse_locations = location_list[num_desired_gso_assets + num_desired_partnet_assets :]
 
             print(f"GSO: {gso_locations.shape}, Partnet: {partnet_locations.shape}, Objaverse: {objaverse_locations.shape}")
 
@@ -906,7 +1105,9 @@ class Blender_render:
             assert len(partnet_locations) == num_desired_partnet_assets
             assert abs(len(objaverse_locations) - num_desired_objaverse_assets) <= 2
 
-            print(f"Weights: {weights}, GSO: {num_desired_gso_assets}, Partnet: {num_desired_partnet_assets}, Objaverse: {num_desired_objaverse_assets}")
+            print(
+                f"Weights: {weights}, GSO: {num_desired_gso_assets}, Partnet: {num_desired_partnet_assets}, Objaverse: {num_desired_objaverse_assets}"
+            )
 
             if num_desired_objaverse_assets > 0:
                 assert self.args.use_objaverse
@@ -914,14 +1115,20 @@ class Blender_render:
                 try:
                     obtained_objaverse_assets = self.download_load_objaverse_objects(objaverse_locations, num_desired_objaverse_assets)
                 except Exception as e:
+                    import traceback
+
+                    traceback.print_exc()
                     print(f"Failed to download and load objaverse assets: {e}.")
                     obtained_objaverse_assets = 0
 
                 print(f"Obtained objaverse assets: {obtained_objaverse_assets}")
 
-                if obtained_objaverse_assets != num_desired_objaverse_assets:
-                    num_desired_gso_assets += (num_desired_objaverse_assets - obtained_objaverse_assets)
-                    gso_locations = np.concatenate((gso_locations, get_loc_list(num_desired_objaverse_assets - obtained_objaverse_assets)))
+                if obtained_objaverse_assets < num_desired_objaverse_assets:
+                    num_desired_gso_assets += num_desired_objaverse_assets - obtained_objaverse_assets
+                    print(f"Adding {num_desired_objaverse_assets - obtained_objaverse_assets} more GSO assets")
+                    print(len(objaverse_locations[obtained_objaverse_assets:]))
+                    gso_locations = np.concatenate((gso_locations, objaverse_locations[obtained_objaverse_assets:]))
+                    assert len(gso_locations) >= num_desired_gso_assets
 
             if num_desired_gso_assets > 0:
                 GSO_assets = sorted(os.listdir(self.GSO_path))
@@ -940,7 +1147,7 @@ class Blender_render:
             else:
                 GSO_assets_path = []
                 print("No GSO assets selected.")
-                
+
             if num_desired_partnet_assets > 0:
                 assert self.args.use_partnet
                 assert num_desired_gso_assets > 0
@@ -997,7 +1204,7 @@ class Blender_render:
                 imported_object.rigid_body.mass = 0.5 * scale / self.scale_factor
                 # bpy.ops.object.modifier_add(type='COLLISION')
             print("GSO assets loaded")
-            
+
             print("Loading partnet assets")
             for j, obj_path in enumerate(partnet_assets):
                 parts = sorted(os.listdir(os.path.join(obj_path, "objs")))
@@ -1104,9 +1311,9 @@ class Blender_render:
             for node in world.node_tree.nodes:
                 world.node_tree.nodes.remove(node)
 
-            node_background = world.node_tree.nodes.new(type='ShaderNodeBackground')
-            node_env = world.node_tree.nodes.new(type='ShaderNodeTexEnvironment')
-            node_output = world.node_tree.nodes.new(type='ShaderNodeOutputWorld')
+            node_background = world.node_tree.nodes.new(type="ShaderNodeBackground")
+            node_env = world.node_tree.nodes.new(type="ShaderNodeTexEnvironment")
+            node_output = world.node_tree.nodes.new(type="ShaderNodeOutputWorld")
             node_env.image = bpy.data.images.load(background_hdr_path)
             world.node_tree.links.new(node_env.outputs["Color"], node_background.inputs["Color"])
             world.node_tree.links.new(node_background.outputs["Background"], node_output.inputs["Surface"])
@@ -1466,7 +1673,7 @@ class Blender_render:
 
         self.args.start_frame = start_frame
         self.args.end_frame = end_frame
-        self.args.save(self.args.output_dir / 'config.json')
+        self.args.save(self.args.output_dir / "config.json")
 
         print(
             f"New start/end range: {range(bpy.context.scene.frame_start, bpy.context.scene.frame_end + 1)}, New FPS: {bpy.context.scene.render.fps}",
@@ -1495,9 +1702,13 @@ class Blender_render:
                 # add keyframe to force strength
                 bpy.context.scene.frame_set(frame_nr)
                 if self.use_animal:
-                    force_loc_list = np.random.uniform(np.array([-16, -16, -3]), np.array([16, 16, 0]), size=(self.num_assets * 50, 3)) * self.scale_factor
+                    force_loc_list = (
+                        np.random.uniform(np.array([-16, -16, -3]), np.array([16, 16, 0]), size=(self.num_assets * 50, 3)) * self.scale_factor
+                    )
                 else:
-                    force_loc_list = np.random.uniform(np.array([-4, -4, -5]), np.array([4, 4, -3]), size=(self.num_assets * 50, 3)) * self.scale_factor
+                    force_loc_list = (
+                        np.random.uniform(np.array([-4, -4, -5]), np.array([4, 4, -3]), size=(self.num_assets * 50, 3)) * self.scale_factor
+                    )
                 force_loc_list = self.farthest_point_sampling(force_loc_list, self.force_num)
                 print("force_loc_list", force_loc_list)
                 for i in range(len(self.gso_force)):
@@ -1520,11 +1731,10 @@ class Blender_render:
                     force_source.keyframe_insert(data_path="field.distance_max", frame=frame_nr + self.force_step)
                     force_source.keyframe_insert(data_path="field.distance_max", frame=frame_nr + self.force_interval - 1)
 
-        
         if self.add_objects:
             bpy.ops.object.select_all(action="SELECT")
             bpy.context.view_layer.objects.active = self.assets_set[0]
-            print("start baking") # bake rigid body simulation
+            print("start baking")  # bake rigid body simulation
             self.bake_to_keyframes(frames[0], frames[-1], 1)
             print("baking done")
 
@@ -1538,17 +1748,25 @@ class Blender_render:
         focal = camdata.lens  # mm
         sensor_width = camdata.sensor_width  # mm
         sensor_height = camdata.sensor_height  # mm
-        scene_info = {"sensor_width": sensor_width, "sensor_height": sensor_height, "focal_length": focal, "assets": ["background"], "fps": bpy.context.scene.render.fps}
+        scene_info = {
+            "sensor_width": sensor_width,
+            "sensor_height": sensor_height,
+            "focal_length": focal,
+            "assets": ["background"],
+            "fps": bpy.context.scene.render.fps,
+        }
 
         if self.premade_scene:
             assets_name = bpy.context.scene.objects.keys()
-            assets_name = [name for name in assets_name if bpy.data.objects[name].type == 'MESH']
+            assets_name = [name for name in assets_name if bpy.data.objects[name].type == "MESH"]
             scene_info["assets"] += assets_name
             if len(self.assets_set) > 0:
                 scene_info["assets"] += [x.data.name for x in self.assets_set]
         else:
             scene_info["assets"] += [x.data.name for x in self.assets_set]
             scene_info["asset_types"] = self.asset_types
+
+        scene_info["background_hdr_path"] = self.background_hdr_path
 
         json.dump(scene_info, open(os.path.join(self.scratch_dir, "scene_info.json"), "w"))
 
@@ -1570,6 +1788,10 @@ class Blender_render:
                 camera_file = np.random.choice(camera_files)
                 print("camera file: ", camera_file)
                 camera_rt = np.loadtxt(camera_file, skiprows=1)[:, 7:].reshape(-1, 3, 4)
+
+                start_idx = np.random.randint(0, max(1, camera_rt.shape[0] - len(frames)))
+                camera_rt = camera_rt[start_idx:start_idx + len(frames) + 2]
+
                 self.bake_camera(camera_rt, frames)
                 bpy.ops.wm.save_as_mainfile(filepath=os.path.join(absolute_path, "scene.blend"))
 
@@ -1616,7 +1838,8 @@ class Blender_render:
                             np.random.uniform(1, 2.5),
                         )
                     )
-                    * self.scale_factor * extra_camera_scale
+                    * self.scale_factor
+                    * extra_camera_scale
                 )
                 self.cam_lookat = mathutils.Vector((0, 0, 0.5)) * self.scale_factor
                 self.set_cam(self.cam_loc, self.cam_lookat)
@@ -1701,6 +1924,7 @@ def get_calibration_matrix_K_from_blender(scene, mode="simple"):
 
 if __name__ == "__main__":
     import sys
+
     argv = sys.argv
     if "--" not in argv:
         argv = []
@@ -1712,12 +1936,12 @@ if __name__ == "__main__":
     parser.add_argument("--output_dir", type=str, metavar="PATH", default="./", help="img save dir")
     tmp_args = parser.parse_args(argv)
     print("args:{0}".format(tmp_args))
-    
+
     output_dir = Path(tmp_args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     args = RenderTap(description=__doc__)
-    args.load(output_dir / 'config.json')
+    args.load(output_dir / "config.json")
 
     renderer = Blender_render(
         samples_per_pixel=args.samples_per_pixel,
@@ -1750,7 +1974,7 @@ if __name__ == "__main__":
         animal_path=args.animal_path,
         animal_name=args.animal_name,
         validation=args.validation,
-        args=args
+        args=args,
     )
 
     renderer.render()

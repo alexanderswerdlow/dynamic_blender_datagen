@@ -20,7 +20,7 @@ except:
     app = DummyApp()
 
 def get_slurm_job_ids(username):
-    result = subprocess.run(['squeue', '-u', username, '-h', '-o', '%A'], capture_output=True, text=True)
+    result = subprocess.run(['squeue', '-h', '-o', '%A'], capture_output=True, text=True)
     job_ids = result.stdout.split()
     return job_ids
 
@@ -42,8 +42,8 @@ def find_folders_with_metadata(path, scene_paths):
 def delete_incomplete_scenes(data_dir: Path = Path("/dev/shm/point_odyssey"), use_time: bool = False, dry_run: bool = False):
     print(f"Data dir: {data_dir}")
     if data_dir.exists() is False:
-        print("/dev/shm/point_odyssey does not exist")
-        exit()
+        print(f"{data_dir} does not exist")
+        return
 
     scene_paths = []
     find_folders_with_metadata(data_dir, scene_paths)
