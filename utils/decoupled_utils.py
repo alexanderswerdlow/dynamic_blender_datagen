@@ -23,6 +23,7 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import urlparse
+from typing import Union
 
 import numpy as np
 import torch
@@ -109,7 +110,7 @@ def calculate_total_size(obj, count_views=False):
     return total_size
 
 
-def save_tensor_dict(tensor_dict: dict, path: str | Path | BytesIO):
+def save_tensor_dict(tensor_dict: dict, path: Union[str, Path, BytesIO]):
     output_dict = {}
     for k, v in tensor_dict.items():
         if isinstance(v, Tensor):
@@ -642,7 +643,7 @@ def torch_to_numpy(arr: Tensor):
     else:
         return arr.cpu().detach().numpy()
     
-def to_numpy(arr: Tensor | np.ndarray):
+def to_numpy(arr: Union[Tensor, np.ndarray]):
     if isinstance(arr, Tensor):
         return torch_to_numpy(arr)
     else:

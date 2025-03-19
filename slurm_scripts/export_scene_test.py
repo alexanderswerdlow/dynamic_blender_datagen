@@ -19,6 +19,7 @@ parser.add_argument('--scene_root', type=str, default='')
 parser.add_argument('--output_dir', type=str, metavar='PATH', default='',
                     help='obj save dir')
 parser.add_argument('--export_character', type=bool, default=True)
+parser.add_argument('--start_frame', type=int, default=None)
 args = parser.parse_args(argv)
 print("args:{0}".format(args))
 
@@ -33,12 +34,13 @@ for collection_name in collection_set:
     assets_keys += [obj.name for obj in collection.objects if obj.type == 'MESH' and not obj.hide_render and not 'Fire' in obj.name and not 'Smoke' in obj.name]
 
 scene_info = json.load(open(os.path.join(args.output_dir, 'scene_info.json'), 'r'))
-scene_info['assets'] = ['background'] + assets_keys
+from pdb import set_trace; set_trace()
+scene_info['assets'] = ['background', "character"] + assets_keys
+
 scene_info['character'] = [s for s in bpy.data.collections.keys() if s not in collection_set and s not in ['Camera', 'Light', 'fog', 'Fog']]
 obj_save_dir = os.path.join(args.output_dir, 'obj')
 if not os.path.exists(obj_save_dir):
     os.makedirs(obj_save_dir)
-print('assets_keys', assets_keys)
 
 # select obj
 bpy.ops.object.select_all(action='DESELECT')
@@ -63,9 +65,10 @@ if args.export_character:
             obj.hide_viewport = False
             obj.select_set(True)
             character_set.append(obj.name)
+
     frames = range(bpy.context.scene.frame_start, bpy.context.scene.frame_end + 1)
     for frame_nr in frames:
-        bpy.context.scene.frame_set(frame_nr)
+        bpy.context.scene.frame_set(frame_nr * args.skip_n)
         bpy.ops.export_scene.obj(filepath=os.path.join(obj_save_dir, f'character_{frame_nr:04d}.obj'),
                                  use_selection=True, use_mesh_modifiers=True,
                                  use_normals=False, use_uvs=False, use_triangles=False,
